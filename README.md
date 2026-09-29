@@ -25,22 +25,24 @@ codex-loop/
 ├── .agents/                              # Antigravity 专有配置与数据
 │   ├── rules/                            # 团队规范与代码约束
 │   └── sessions/                         # 自动同步的会话纪要与设计决策 (Git 追踪)
-│       └── 2026-09-29-dual-agent-architecture.md
+│       ├── 2026-09-29-find-codex-skill.md         # 【会话沉淀一】Windows 技能检索、探测与模型追踪讨论
+│       └── 2026-09-29-dual-agent-architecture.md  # 【会话沉淀二】双 Agent 架构设计与四道防灾防线研讨
 │
 ├── .codex/                               # Codex 专有配置
 │   └── config.toml                       # 项目级模型配置 (gpt-6.1-sol / xhigh)
 │
 ├── docs/                                 # 共享知识库与架构文档
-│   ├── architecture.md                   # 双 Agent 架构设计与理论规范
-│   └── sessions/                         # 导出文档备用目录
+│   ├── architecture.md                   # 双 Agent 架构设计与协作规范
+│   ├── environment-and-models.md         # 跨平台探测逻辑、CC-Switch 对接与零硬编码模型追踪
+│   └── skill-origin-and-evolution.md     # 技能溯源 (Ubuntu -> Windows) 与同步维护指南
 │
 ├── scripts/                              # 核心工具链
 │   ├── codex_loop.py                     # 双 Agent 自动化规划与审查引擎
-│   └── sync_session.py                   # 会话纪要自动同步工具
+│   └── sync_session.py                   # 会话纪要自动同步与导出工具 (支持 --list / --conv-id)
 │
 ├── AGENTS.md                             # 最高协作宪法 (Gemini 与 Codex 原生共同遵守)
 ├── SKILL.md                              # Antigravity Skill 标准定义
-├── README.md                             # 项目说明
+├── README.md                             # 项目说明与上手文档
 └── .gitignore                            # Git 忽略配置
 ```
 
@@ -100,7 +102,7 @@ python scripts/sync_session.py --title "jwt-auth-implementation"
 
 你可以将本项目作为长期进化的 Skill 挂载到 Antigravity 全局配置中：
 ```bash
-# 复制或建立软链接到 ~/.gemini/config/skills/
-powershell -Command "Copy-Item -Path 'D:\codex-loop' -Destination '$env:USERPROFILE\.gemini\config\skills\codex' -Recurse -Force"
+# 同步运行时文件至全局技能目录（安全排除 .git 与 .agents）
+powershell -Command "Get-ChildItem -Path 'D:\codex-loop' -Exclude '.git', '.agents' | Copy-Item -Destination '$env:USERPROFILE\.gemini\config\skills\codex' -Recurse -Force"
 ```
 在任何对话中输入 `/codex`，即可直接调用最新的 `gpt-6.1-sol` 协同逻辑！

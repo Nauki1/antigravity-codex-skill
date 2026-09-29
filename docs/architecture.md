@@ -39,3 +39,15 @@
 
 - 对话不再转瞬即逝：通过 `scripts/sync_session.py`，每次关键迭代的对话记录和决策要点都会被持久化为 Markdown 并受 Git 版本控制。
 - Codex 在执行时，可读取 `.agents/sessions/` 下的历史纪要，保持上下文平滑延续。
+
+---
+
+## 5. 衍生文档与历史会话索引 (References & Sessions)
+
+- **环境与模型追踪**：[docs/environment-and-models.md](file:///D:/codex-loop/docs/environment-and-models.md)
+  *详细记录跨平台 Codex CLI 探测优先级、CC-Switch 鉴权、与 `gpt-6.1-sol` 零硬编码自动追踪体系。*
+- **技能演进史**：[docs/skill-origin-and-evolution.md](file:///D:/codex-loop/docs/skill-origin-and-evolution.md)
+  *记录从 Ubuntu 初始 Skill 到 Windows 检索、跨平台迁移及单工作区演进的全过程。*
+- **核心会话归档**：
+  - [`.agents/sessions/2026-09-29-find-codex-skill.md`](file:///D:/codex-loop/.agents/sessions/2026-09-29-find-codex-skill.md)：*首次在 Windows 检索、安装并解决自动跟进最新模型的讨论记录。*
+  - [`.agents/sessions/2026-09-29-dual-agent-architecture.md`](file:///D:/codex-loop/.agents/sessions/2026-09-29-dual-agent-architecture.md)：*单工作区多 Agent 隔离共享架构与四道防灾防线的深度研讨。*

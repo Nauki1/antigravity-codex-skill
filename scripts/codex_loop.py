@@ -14,6 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Ensure UTF-8 stdout/stderr on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 def find_codex_binary():
     """Locate the Codex CLI executable across environments, prioritizing user's active runtime."""
@@ -116,13 +122,14 @@ def run_plan(prompt, model=None, reasoning_effort="xhigh", target_file=None):
     cmd.append(full_prompt)
 
     print(f"[*] 启动 Codex 规划中 (Model: {effective_model}, Reasoning: {reasoning_effort})...", file=sys.stderr)
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
 
     if res.returncode != 0:
-        print(f"[!] Codex 规划执行失败 (code {res.returncode}):\n{res.stderr}", file=sys.stderr)
-        return False, res.stderr
+        err_msg = res.stderr or ""
+        print(f"[!] Codex 规划执行失败 (code {res.returncode}):\n{err_msg}", file=sys.stderr)
+        return False, err_msg
 
-    output = res.stdout.strip()
+    output = (res.stdout or "").strip()
     if target_file:
         p = Path(target_file)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -147,13 +154,14 @@ def run_review(instructions=None, model=None, base=None):
         cmd.append(instructions)
 
     print(f"[*] 启动 Codex 代码审查中 (Model: {effective_model})...", file=sys.stderr)
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
 
     if res.returncode != 0:
-        print(f"[!] Codex 审查执行失败 (code {res.returncode}):\n{res.stderr}", file=sys.stderr)
-        return False, res.stderr
+        err_msg = res.stderr or ""
+        print(f"[!] Codex 审查执行失败 (code {res.returncode}):\n{err_msg}", file=sys.stderr)
+        return False, err_msg
 
-    output = res.stdout.strip()
+    output = (res.stdout or "").strip()
     output_lower = output.lower()
     is_approved = (
         "APPROVED" in output.splitlines()[-3:]
