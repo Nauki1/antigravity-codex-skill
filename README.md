@@ -1,7 +1,7 @@
 # codex-loop 🔄
 
 > **Antigravity (Gemini) + OpenAI Codex CLI 双智能体协同闭环框架与可进化 Skill**  
-> GitHub Repository: [https://github.com/Nauki1/codex-loop](https://github.com/Nauki1/codex-loop)
+> GitHub Repository: [https://github.com/Nauki1/antigravity-codex-skill](https://github.com/Nauki1/antigravity-codex-skill)
 
 ---
 

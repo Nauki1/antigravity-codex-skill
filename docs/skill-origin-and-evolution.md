@@ -11,7 +11,7 @@ flowchart LR
     Origin["<b>Ubuntu Antigravity</b><br/>~/.gemini/config/skills/codex<br/>最初提出双 Agent 协作雏形"] --> GitHub["<b>GitHub 阶段</b><br/>Nauki1/antigravity-codex-skill<br/>开源托管与脚本归档"]
     GitHub --> Discovery["<b>Find Codex Skill 会话</b><br/>Windows 环境检索与适配<br/>解决 PATH 缺失与模型追踪"]
     Discovery --> Synthesis["<b>Antigravity与Codex项目架构 会话</b><br/>提出单工作区隔离架构<br/>定义 4 道防灾防线与 AGENTS.md 宪法"]
-    Synthesis --> Repository["<b>codex-loop 项目落地 (D:\codex-loop)</b><br/>Nauki1/codex-loop 仓库<br/>成为长期可演进的完备双智能体工程"]
+    Synthesis --> Repository["<b>codex-loop 项目落地 (D:\codex-loop)</b><br/>Nauki1/antigravity-codex-skill 仓库<br/>成为长期可演进的完备双智能体工程"]
 ```
 
 ### 第一阶段：Ubuntu 原生探索
@@ -28,7 +28,7 @@ flowchart LR
 - 用户深入思考：如何把对话、项目文件与 Codex/Antigravity 融为一体？
 - 确立了**“单一工作区、目录隔离、Git 为唯一事实标准、`AGENTS.md` 为共同契约”**的体系。
 - 解决了**“单独使用 Gemini 是否割裂”**与**“AI 过度自信/自检盲区搞崩项目”**两大顾虑，确立了四道物理防线。
-- 决定以独立代码库 `D:\codex-loop`（关联 GitHub [Nauki1/codex-loop](https://github.com/Nauki1/codex-loop)）作为长青演进项目。
+- 决定以独立代码库 `D:\codex-loop`（关联 GitHub [Nauki1/antigravity-codex-skill](https://github.com/Nauki1/antigravity-codex-skill)）作为长青演进项目。
 
 ---
 
