@@ -64,8 +64,17 @@ Codex 审查工作区未提交变更，拦截逻辑漏洞与回归隐患：
 ```bash
 python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 ```
-- 返回码 `0`：**APPROVED**。审查通过，可提交交付。
-- 返回码 `2`：**ACTION_NEEDED**。发现缺陷，进入修复循环。
+- 返回码 `0`：有效结论为 **APPROVED**，审查通过。
+- 返回码 `2`：有效结论为 **NEEDS_FIX**，进入修复循环。
+- 返回码 `1`：调用失败或报告没有有效结论，保持待审查，不能提交交付。
+
+审查模式互斥：默认审查 staged、unstaged 和 untracked 变更；`--base <REF>` 先解析 REF 与 HEAD 的 merge base，再审查其后的已跟踪差异；`--instructions "审查重点"` 增加未提交变更的审查重点。`--base` 与 `--instructions` 不能组合。底层统一使用原生自定义审查 PROMPT，以便附加结果协议；不与原生 `--base` / `--uncommitted` 标志混用。
+
+原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出审查协议 JSON（协议版本、审查完成状态、发现数量、整体正确性及理由）。CLI 渲染此解释并附加发现详情。包装器仅在审查完整、发现数量为零、整体结论为 `patch is correct` 且没有额外内容时批准。有发现或整体结论错误时需修复；结构缺失、字段重复和类型错误均不放行。
+
+底层通过 `codex exec review --ephemeral --output-last-message <临时文件>` 取得渲染后的最终报告，并保留完整内容。此选项不导出原生 JSON。调用、基线解析或结果读取失败时返回 `1`，临时文件读取后自动清理，不写入目标工程。
+
+包装器负责输出项目约定的 `APPROVED` / `NEEDS_FIX` 末行结论。协议通过调用提示词传入，已有目标工程无需修改规则来适配审批解析。不能把 CLI 执行成功、自然语言措辞、否定、引用或代码示例中的批准词当成批准。
 
 #### Step 4: 修复闭环 (Remediation Loop)
 - Antigravity 读取审查反馈意见。

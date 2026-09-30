@@ -75,8 +75,17 @@ python scripts/codex_loop.py plan "为项目增加基于 JWT 的认证与双因�
 ```bash
 python scripts/codex_loop.py review
 ```
-- 若返回 `0`：判定为 **APPROVED**，审查通过！
-- 若返回 `2`：Codex 指出潜在缺陷与修改建议。
+- 返回 `0`：有效结论为 **APPROVED**，审查通过。
+- 返回 `2`：有效结论为 **NEEDS_FIX**，需要修复后复审。
+- 返回 `1`：调用失败，或报告为空、缺少有效结论、存在引用或矛盾；任务保持待审查。
+
+默认审查 staged、unstaged 和 untracked 变更；`--base` 审查指定分支与 HEAD 的 merge base 之后的已跟踪差异；`--instructions` 增加未提交变更的审查重点。`--base` 与 `--instructions` 不能同时使用。包装器统一使用原生自定义审查 PROMPT，附加结果协议，不混用原生 CLI 的 `--uncommitted` / `--base` 与 PROMPT。[OpenAI 参数文档](https://learn.chatgpt.com/docs/developer-commands)
+
+原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出审查协议 JSON（协议版本、审查完成状态、发现数量、整体正确性及理由）。CLI 会渲染此解释，并在其后附加发现详情。包装器仅在审查完整、发现数量为零、整体结论为 `patch is correct` 且没有额外内容时批准；字段缺失、重复、类型错误或不完整都不放行。
+
+底层使用 `codex exec review --ephemeral --output-last-message <临时文件>` 取得渲染后的最终报告，而不是假设它导出原生 JSON。包装器保留完整报告，再输出对应的末行结论。进程失败、基线解析失败或临时结果缺失时返回 `1`；结果文件在读取后自动清理，不写入目标工程。
+
+普通的 `LGTM`、否定、引用或代码示例中的批准词不会放行。协议通过调用提示词传入；已有目标工程无需修改规则来适配审批解析。
 
 #### Step 4: 修复闭环 (Antigravity Fix)
 Antigravity 针对 Codex 的 Review 意见进行微调，再次运行 `review` 直至获得 `APPROVED`。

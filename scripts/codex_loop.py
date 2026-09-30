@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # Ensure UTF-8 stdout/stderr on Windows
@@ -185,6 +186,8 @@ AGENTS_TEMPLATE = """# Dual-Agent Workspace Constitution (Antigravity & Codex)
    - 任何改动完成前，必须在终端实际运行对应的构建或测试脚本，且退出码（Exit Code）为 0 方可视为通过。
 3. **关键任务异构审查 (Heterogeneous Red Teaming)**：
    - 涉及核心算法、架构改造、底层鉴权或跨模块调用的变更，必须调用 `codex review` 获得 `APPROVED` 判定。
+   - 审查报告先给出发现和理由，最后一行只写 `APPROVED`（无待修复问题）或 `NEEDS_FIX`（存在待修复问题）。
+   - 结论只出现一次，不放入引用、代码块或示例；未完成审查时不得输出批准。
 4. **Git 物理防灾与版本整洁**：
    - 进行可能具有破坏性的复杂修改前，必须确保 git 工作区 clean，或在独立 feature 分支中进行。
    - 遇到逻辑混乱或失控时，优先使用 `git restore .` 瞬间回滚，严禁在错误代码上持续“盲打补丁”。
@@ -299,47 +302,129 @@ def run_plan(prompt, model=None, reasoning_effort="xhigh", target_file=None, tar
     return True, output
 
 
+REVIEW_PROTOCOL = (
+    "Keep your native review JSON schema and all actionable findings. "
+    "The CLI renders overall_explanation but hides the other native fields. "
+    "Therefore overall_explanation MUST be a string containing exactly one JSON "
+    "object with these fields: protocol (\"codex-loop-review-v1\"), review_complete "
+    "(boolean), findings_count (integer equal to the native findings list length), "
+    "overall_correctness (same as the native overall_correctness: \"patch is correct\" "
+    "or \"patch is incorrect\"), reason (nonempty explanation string). "
+    "Do not wrap this object in Markdown or add text outside it. If review could "
+    "not be completed, set review_complete to false. The wrapper preserves this "
+    "report and emits APPROVED only for a complete, correct review with zero findings; "
+    "otherwise it emits NEEDS_FIX or fails without approval."
+)
+
+
+class ReviewError(RuntimeError):
+    """Review execution or output was invalid; no approval may be issued."""
+
+    def __init__(self, message, output=""):
+        super().__init__(message)
+        self.output = output
+
+
+def parse_review_verdict(output):
+    """Validate the explicit envelope exported by the native review renderer."""
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate field: {key}")
+            result[key] = value
+        return result
+
+    try:
+        report, end = json.JSONDecoder(object_pairs_hook=unique_fields).raw_decode(output.lstrip())
+    except (ValueError, TypeError) as exc:
+        raise ReviewError("审查协议 JSON 不完整或包含重复字段，未取得批准。", output) from exc
+    required = {"protocol", "review_complete", "findings_count", "overall_correctness", "reason"}
+    if (
+        not isinstance(report, dict) or set(report) != required
+        or report["protocol"] != "codex-loop-review-v1"
+        or report["review_complete"] is not True
+        or type(report["findings_count"]) is not int or report["findings_count"] < 0
+        or report["overall_correctness"] not in ("patch is correct", "patch is incorrect")
+        or not isinstance(report["reason"], str) or not report["reason"].strip()
+    ):
+        raise ReviewError("审查协议缺少有效的完整结论，未取得批准。", output)
+    # The renderer appends native findings after overall_explanation. Such text
+    # must never be ignored when a zero-findings approval is claimed.
+    if output.lstrip()[end:].strip() and report["findings_count"] == 0:
+        raise ReviewError("零发现结论后仍有额外内容，未取得批准。", output)
+    if report["findings_count"] or report["overall_correctness"] == "patch is incorrect":
+        return "NEEDS_FIX"
+    return "APPROVED"
+
+
 def run_review(instructions=None, model=None, base=None, target_project=None):
-    """Run Codex code review against uncommitted changes in target_project."""
+    """Review one scope; return (approved, raw output), or raise ReviewError."""
+    if base is not None and instructions is not None:
+        raise ReviewError("--base 与 --instructions 不能同时使用。")
+    if base is not None and not base.strip():
+        raise ReviewError("--base 不能为空。")
+    if instructions is not None and not instructions.strip():
+        raise ReviewError("--instructions 不能为空。")
     target = resolve_target_project(target_project)
     current_info = get_current_info(target_project=target)
     effective_model = model or current_info.get("active_model", "gpt-6.1-sol")
 
-    cmd = [CODEX_BIN, "review", "--uncommitted"]
+    # Use the native custom review target to attach the protocol without mixing
+    # a PROMPT with the mutually exclusive --base/--uncommitted targets.
+    cmd = [CODEX_BIN, "exec", "review", "--ephemeral"]
     if effective_model:
         cmd.extend(["-c", f'model="{effective_model}"'])
-    if base:
-        cmd.extend(["--base", base])
-    if instructions:
-        cmd.append(instructions)
+    if base is not None:
+        try:
+            merge_base = subprocess.run(
+                ["git", "merge-base", "--", "HEAD", base], cwd=str(target),
+                stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+            )
+        except OSError as exc:
+            raise ReviewError(f"无法解析审查基线: {exc}") from exc
+        revision = (merge_base.stdout or "").strip()
+        if merge_base.returncode != 0 or len(revision) not in (40, 64) or any(c not in "0123456789abcdef" for c in revision):
+            raise ReviewError(f"无法解析审查基线 {base!r}: {merge_base.stderr or ''}")
+        scope = (
+            f"Review the tracked changes against the merge base {revision} of HEAD "
+            f"and base branch {json.dumps(base)}. Inspect git diff {revision}, including "
+            "staged and unstaged changes. Do not review unrelated untracked files."
+        )
+    else:
+        scope = "Review all staged, unstaged, and untracked changes in the current project."
+    prompt = f"{scope}\nAdditional review instructions:\n{instructions or ''}\n\n{REVIEW_PROTOCOL}"
+    cmd.extend(["--", prompt])
 
     print(f"[*] 启动 Codex 代码审查中 (Project: {target}, Model: {effective_model})...", file=sys.stderr)
-    res = subprocess.run(
-        cmd,
-        cwd=str(target),
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace"
-    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="codex_review_") as review_dir:
+            report_path = Path(review_dir) / "result.txt"
+            # Place options before the custom prompt's -- delimiter.
+            cmd[4:4] = ["--output-last-message", str(report_path)]
+            res = subprocess.run(
+                cmd,
+                cwd=str(target),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace"
+            )
+            if res.returncode != 0:
+                print(res.stdout or "")
+                raise ReviewError(f"Codex 审查执行失败 (code {res.returncode}):\n{res.stderr or ''}", res.stdout or "")
+            with report_path.open(encoding="utf-8", newline="") as report_file:
+                output = report_file.read()
+    except (OSError, UnicodeError) as exc:
+        raise ReviewError(f"Codex 审查调用或结果读取失败: {exc}") from exc
 
-    if res.returncode != 0:
-        err_msg = res.stderr or ""
-        print(f"[!] Codex 审查执行失败 (code {res.returncode}):\n{err_msg}", file=sys.stderr)
-        return False, err_msg
+    print(output, end="" if output.endswith("\n") else "\n")
 
-    output = (res.stdout or "").strip()
-    output_lower = output.lower()
-    is_approved = (
-        "APPROVED" in output.splitlines()[-3:]
-        or "APPROVED" in output[-60:]
-        or "no actionable regressions" in output_lower
-        or "no regressions" in output_lower
-        or "looks good" in output_lower
-        or "lgtm" in output_lower
-    )
-    print(output)
-    print(f"\n[*] 审查结果判定: {'已通过 (APPROVED)' if is_approved else '需要修改 (REJECTED/ACTION_NEEDED)'}", file=sys.stderr)
+    verdict = parse_review_verdict(output)
+    is_approved = verdict == "APPROVED"
+    # Preserve the exported report, then emit the explicit project verdict.
+    print(verdict)
+    print(f"\n[*] {'审查已通过' if is_approved else '审查需要修复'}", file=sys.stderr)
     return is_approved, output
 
 
@@ -412,9 +497,10 @@ def build_parser():
         parents=[parent_parser],
         help="Review current uncommitted diff in target project"
     )
-    p_review.add_argument("--instructions", "-i", help="Custom review instructions")
+    review_scope = p_review.add_mutually_exclusive_group()
+    review_scope.add_argument("--instructions", "-i", help="Custom review instructions for uncommitted changes (conflicts with --base)")
     p_review.add_argument("--model", "-m", help="Specific review model")
-    p_review.add_argument("--base", "-b", help="Base branch")
+    review_scope.add_argument("--base", "-b", help="Base branch (conflicts with --instructions)")
 
     return parser
 
@@ -444,12 +530,16 @@ def main(argv=None):
         success = run_agy(task_file=args.task, prompt=args.prompt, target_project=target_project)
         sys.exit(0 if success else 1)
     elif args.command == "review":
-        approved, _ = run_review(
-            instructions=args.instructions,
-            model=args.model,
-            base=args.base,
-            target_project=target_project
-        )
+        try:
+            approved, _ = run_review(
+                instructions=args.instructions,
+                model=args.model,
+                base=args.base,
+                target_project=target_project
+            )
+        except (ReviewError, OSError) as exc:
+            print(f"[!] {exc}", file=sys.stderr)
+            sys.exit(1)
         sys.exit(0 if approved else 2)
 
 

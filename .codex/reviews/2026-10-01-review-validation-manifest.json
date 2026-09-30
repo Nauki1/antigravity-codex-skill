@@ -1,0 +1,20 @@
+{
+  "branch": "codex/fix-review-validation",
+  "head": "228947c3e23e8820d3968c832826b20b639411de",
+  "files": {
+    "AGENTS.md": "ade860165cc5a9d1fd73e7fb2895dbbcf33719a0de50b2119e0116051212a2ea",
+    "README.md": "c80570afeb0258cec42c29912e7bc59f9845d0f6ad0a5e48ac9f37ae0f68a044",
+    "SKILL.md": "1671755cd40aad13c0559deaed35826b6b71827cad444586b11b3a226a59f53f",
+    "scripts/codex_loop.py": "5919b8d1a6d416376142ef927bf4f3cad54263826b3363e33980af230f364584",
+    "tests/test_review.py": "09c0a408c2d1403b2a37a9df04d67110f26ee3f600630e7800666811a152f7b8"
+  },
+  "test_command": "python -B -m unittest discover -s tests -p \"test_*.py\" -v",
+  "test_count": 35,
+  "test_exit_code": 0,
+  "review_model_requested": "gpt-6.1-sol",
+  "review_command": "codex exec review --ephemeral --output-last-message <temporary file> -c model=\"gpt-6.1-sol\" -- <scope, review instructions and envelope protocol>",
+  "review_exit_code": 0,
+  "review_result_sha256": "73282a58d45b6d1fee00c9cc38c28a08593beceee88d3a04c8cea7294f94b5a5",
+  "review_result_channel": "rendered final report exported by output-last-message",
+  "source_hashes_verified_after_review": true
+}
