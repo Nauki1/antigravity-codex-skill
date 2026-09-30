@@ -71,6 +71,7 @@ python scripts/codex_loop.py plan "为项目增加基于 JWT 的认证与双因�
 - 以终端测试通过（Exit Code 0）为准绳。
 
 #### Step 3: 异构无头代码审查 (Codex Review)
+先按 [任务模板](docs/task-template.md) 记录目标、验收标准、支持范围、不做事项和验收命令。审查默认读取目标工程的 `docs/task.md`，可用 `--task <PATH>` 指定；审查期间标准变化则批准失效。未提供任务文档时沿用明确的用户指令和既有功能约束，不凭空增加要求。详见 [审查与收工规则](docs/review-policy.md)。
 对未提交的代码改动（Git Diff）触发无头审查：
 ```bash
 python scripts/codex_loop.py review

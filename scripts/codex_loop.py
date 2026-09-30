@@ -8,6 +8,7 @@ Target Project Parameterization: Enables using codex-loop from global skill acro
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -179,6 +180,7 @@ AGENTS_TEMPLATE = """# Dual-Agent Workspace Constitution (Antigravity & Codex)
 所有智能体在本项目中均须严格遵守以下四项铁律：
 
 1. **最小修改原则 (Minimal Blast Radius)**：
+   - 开工前在任务文档写清目标、可验证的验收标准、支持范围、不做事项和验收命令。实施与审查沿用同一标准；扩大范围需用户授权。
    - 严格只修改与目标直接相关的代码。
    - 严禁借“重构”名义未经用户批准擅自重写未受影响的现存功能、配置文件或基础类库。
 2. **铁证验收原则 (Evidence-Based Completion)**：
@@ -270,7 +272,9 @@ def run_plan(prompt, model=None, reasoning_effort="xhigh", target_file=None, tar
         f"当前工程目录：{target}\n"
         f"用户需求：\n{prompt}\n\n"
         f"请输出规范清晰的技术设计、步骤分解（Checklist）和质量约束。\n"
-        f"要求：输出结构清晰的 Markdown。"
+        "要求：输出结构清晰的 Markdown，明确列出目标、可验证的验收标准、支持范围、"
+        "不做事项和验收命令。区分用户要求与待确认假设；未经用户确认的假设不能成为"
+        "额外的验收门槛。实施和审查沿用这份标准，扩大范围需用户授权。"
     )
     cmd.append(full_prompt)
 
@@ -316,6 +320,15 @@ REVIEW_PROTOCOL = (
     "otherwise it emits NEEDS_FIX or fails without approval."
 )
 
+REVIEW_CRITERIA = (
+    "Judge the change against the user's acceptance criteria and supported scope. "
+    "Do not turn naming preferences, optional refactoring, speculative future "
+    "features, or inputs outside the supported scope into required work. "
+    "Check relevant regressions, security, and data integrity even if the task "
+    "did not list each existing guarantee. Do not silently expand or redefine "
+    "the agreed acceptance criteria."
+)
+
 
 class ReviewError(RuntimeError):
     """Review execution or output was invalid; no approval may be issued."""
@@ -358,7 +371,24 @@ def parse_review_verdict(output):
     return "APPROVED"
 
 
-def run_review(instructions=None, model=None, base=None, target_project=None):
+def load_review_task(target, task_file=None):
+    """Read a target-project task snapshot; an explicit missing task is an error."""
+    path = Path(task_file) if task_file is not None else Path("docs/task.md")
+    if not path.is_absolute():
+        path = target / path
+    if task_file is None and not path.exists():
+        return None
+    try:
+        content = path.read_bytes()
+        text = content.decode("utf-8-sig")
+    except (OSError, UnicodeError) as exc:
+        raise ReviewError(f"无法读取任务验收标准 {path}: {exc}") from exc
+    if not text.strip():
+        raise ReviewError(f"任务验收标准为空: {path}")
+    return path, hashlib.sha256(content).hexdigest(), text
+
+
+def run_review(instructions=None, model=None, base=None, target_project=None, task_file=None):
     """Review one scope; return (approved, raw output), or raise ReviewError."""
     if base is not None and instructions is not None:
         raise ReviewError("--base 与 --instructions 不能同时使用。")
@@ -367,6 +397,7 @@ def run_review(instructions=None, model=None, base=None, target_project=None):
     if instructions is not None and not instructions.strip():
         raise ReviewError("--instructions 不能为空。")
     target = resolve_target_project(target_project)
+    task = load_review_task(target, task_file)
     current_info = get_current_info(target_project=target)
     effective_model = model or current_info.get("active_model", "gpt-6.1-sol")
 
@@ -393,8 +424,12 @@ def run_review(instructions=None, model=None, base=None, target_project=None):
         )
     else:
         scope = "Review all staged, unstaged, and untracked changes in the current project."
-    prompt = f"{scope}\nAdditional review instructions:\n{instructions or ''}\n\n{REVIEW_PROTOCOL}"
-    cmd.extend(["--", prompt])
+    task_context = (
+        f"Agreed task snapshot ({task[0]}, SHA-256 {task[1]}):\n{task[2]}"
+        if task else "No task document supplied. Use explicit user instructions and existing project guarantees; do not invent requirements."
+    )
+    prompt = f"{scope}\n{REVIEW_CRITERIA}\n{task_context}\nAdditional review instructions:\n{instructions or ''}\n\n{REVIEW_PROTOCOL}"
+    cmd.extend(["--", "-"])
 
     print(f"[*] 启动 Codex 代码审查中 (Project: {target}, Model: {effective_model})...", file=sys.stderr)
     try:
@@ -405,7 +440,7 @@ def run_review(instructions=None, model=None, base=None, target_project=None):
             res = subprocess.run(
                 cmd,
                 cwd=str(target),
-                stdin=subprocess.DEVNULL,
+                input=prompt,
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace"
@@ -419,6 +454,13 @@ def run_review(instructions=None, model=None, base=None, target_project=None):
         raise ReviewError(f"Codex 审查调用或结果读取失败: {exc}") from exc
 
     print(output, end="" if output.endswith("\n") else "\n")
+
+    try:
+        latest_task = load_review_task(target, task_file)
+    except ReviewError as exc:
+        raise ReviewError(f"审查后任务验收标准无法读取: {exc}", output) from exc
+    if (latest_task[1] if latest_task else None) != (task[1] if task else None):
+        raise ReviewError("审查期间任务验收标准发生变化，需重新审查。", output)
 
     verdict = parse_review_verdict(output)
     is_approved = verdict == "APPROVED"
@@ -500,6 +542,7 @@ def build_parser():
     review_scope = p_review.add_mutually_exclusive_group()
     review_scope.add_argument("--instructions", "-i", help="Custom review instructions for uncommitted changes (conflicts with --base)")
     p_review.add_argument("--model", "-m", help="Specific review model")
+    p_review.add_argument("--task", "-t", help="Acceptance criteria file (default: target docs/task.md if present)")
     review_scope.add_argument("--base", "-b", help="Base branch (conflicts with --instructions)")
 
     return parser
@@ -535,7 +578,8 @@ def main(argv=None):
                 instructions=args.instructions,
                 model=args.model,
                 base=args.base,
-                target_project=target_project
+                target_project=target_project,
+                task_file=args.task,
             )
         except (ReviewError, OSError) as exc:
             print(f"[!] {exc}", file=sys.stderr)

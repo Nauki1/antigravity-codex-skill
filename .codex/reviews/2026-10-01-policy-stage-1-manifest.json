@@ -1,0 +1,20 @@
+{
+  "stage": 1,
+  "base_head": "18b280e0cffe29b90036b1adfecc81fc5a94f3fd",
+  "files": {
+    "AGENTS.md": "1341105b4d64d5b920275a4ce79fdd039abde9ad8eb41744a856dd5474ef0835",
+    "README.md": "b3641ee05aa8ba3e8cb780353a26b3c0de9feab81893b93d9f54d9f99d22e693",
+    "SKILL.md": "f257580c3316db645d85b2c066462a6c2e8b230dadc650564c7f0af1440dd558",
+    "docs/review-policy.md": "8d47d9575acbf744373dd457fbd19ccd16450e730ec217fd5bdbf3c790cdc531",
+    "docs/task-template.md": "08a3967b91de9e4c0547749fd2ed17cbb9e2a14a5d9482b91497dbbd100c8335",
+    "scripts/codex_loop.py": "68063e599cba9da6935cb1dac51d8a566886b64a07b9c95d2bf6dbf63e8ed081",
+    "tests/test_review.py": "ae3bd98ec44985e01eef8b2f1d15f2b0fbefbbe5bbdbe68f302bafbdfd864a1a"
+  },
+  "test_count": 41,
+  "test_exit_code": 0,
+  "test_command": "python -B -m unittest discover -s tests -p \"test_*.py\" -v",
+  "scope": "Freeze acceptance criteria: planning requests goal, verifiable acceptance criteria, supported scope, non-goals and validation commands; review loads a target-relative task snapshot and invalidates approval if its contents change. Existing review APIs remain compatible; an absent implicit task is allowed, but explicit missing/empty/invalid files stop before invoking Codex.",
+  "review_exit_code": 0,
+  "review_model_requested": "gpt-6.1-sol",
+  "review_result_sha256": "167a0d45c6376b2865a18082d33a73ba51d6fb71e51826267de83564ac0ba9ef"
+}

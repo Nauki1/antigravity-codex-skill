@@ -125,11 +125,12 @@ class TestReview(unittest.TestCase):
         args = self.runner.call_args.args[0]
         self.assertNotIn("--uncommitted", args)
         self.assertNotIn("--base", args)
-        self.assertIn("staged, unstaged, and untracked", args[-1])
-        self.assertIn(codex_loop.REVIEW_PROTOCOL, args[-1])
+        self.assertIn("staged, unstaged, and untracked", self.runner.call_args.kwargs["input"])
+        self.assertIn(codex_loop.REVIEW_PROTOCOL, self.runner.call_args.kwargs["input"])
         self.assertEqual(args[-2], "--")
+        self.assertEqual(args[-1], "-")
         self.assertEqual(self.runner.call_args.kwargs["cwd"], str(Path(self.target).resolve()))
-        self.assertEqual(self.runner.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertNotIn("stdin", self.runner.call_args.kwargs)
 
     def test_base_review_pins_merge_base_without_conflicting_flags(self):
         self.response(self.native_report())
@@ -140,12 +141,12 @@ class TestReview(unittest.TestCase):
         merge_call = self.runner.call_args_list[0]
         self.assertEqual(merge_call.args[0], ["git", "merge-base", "--", "HEAD", "origin/main"])
         self.assertEqual(merge_call.kwargs["cwd"], str(Path(self.target).resolve()))
-        self.assertIn("a" * 40, args[-1])
-        self.assertIn('"origin/main"', args[-1])
+        self.assertIn("a" * 40, self.runner.call_args.kwargs["input"])
+        self.assertIn('"origin/main"', self.runner.call_args.kwargs["input"])
         self.assertEqual(args[:3], ["test-codex", "exec", "review"])
         self.assertEqual(args[-4:-2], ["-c", 'model="test-model"'])
         self.assertIn("--output-last-message", args)
-        self.assertIn(codex_loop.REVIEW_PROTOCOL, args[-1])
+        self.assertIn(codex_loop.REVIEW_PROTOCOL, self.runner.call_args.kwargs["input"])
 
     def test_custom_instructions_use_prompt_without_target_flags(self):
         self.response(self.native_report())
@@ -153,9 +154,9 @@ class TestReview(unittest.TestCase):
         args = self.runner.call_args.args[0]
         self.assertNotIn("--uncommitted", args)
         self.assertNotIn("--base", args)
-        self.assertIn("Review Unicode path handling.", args[-1])
-        self.assertIn("APPROVED", args[-1])
-        self.assertIn("NEEDS_FIX", args[-1])
+        self.assertIn("Review Unicode path handling.", self.runner.call_args.kwargs["input"])
+        self.assertIn("APPROVED", self.runner.call_args.kwargs["input"])
+        self.assertIn("NEEDS_FIX", self.runner.call_args.kwargs["input"])
         self.assertEqual(args[-2], "--")
 
     def test_conflicting_scope_and_prompt_rejected_before_launch(self):
@@ -231,6 +232,67 @@ class TestReview(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(codex_loop.ReviewError):
                 self.review(**kwargs)
         self.runner.assert_not_called()
+
+    def test_default_task_is_read_from_target_project(self):
+        task = Path(self.target) / "docs/task.md"
+        task.parent.mkdir()
+        task.write_text("Acceptance: support nonempty integer lists.\nNon-goal: float support.", encoding="utf-8")
+        self.response(self.native_report())
+        self.review()
+        prompt = self.runner.call_args.kwargs["input"]
+        self.assertIn(task.read_bytes().decode("utf-8"), prompt)
+        self.assertIn(str(task), prompt)
+        self.assertIn("SHA-256", prompt)
+
+    def test_explicit_task_path_is_relative_to_target(self):
+        task = Path(self.target) / "验收 标准.md"
+        task.write_text("验收：原有功能仍然可用。", encoding="utf-8")
+        self.response(self.native_report())
+        self.assertEqual(self.invoke("--task", task.name), 0)
+        self.assertIn("原有功能仍然可用", self.runner.call_args.kwargs["input"])
+
+    def test_missing_empty_and_invalid_utf8_tasks_fail_before_launch(self):
+        task = Path(self.target) / "task.md"
+        for content in (None, b" \n", b"\xef\xbb\xbf \n", b"\xff"):
+            with self.subTest(content=content):
+                if content is not None:
+                    task.write_bytes(content)
+                self.assertEqual(self.invoke("--task", task.name), 1)
+                self.runner.assert_not_called()
+
+    def test_task_changed_during_review_invalidates_approval(self):
+        task = Path(self.target) / "task.md"
+        task.write_text("Acceptance: initial standard.", encoding="utf-8")
+        self.response(self.native_report())
+        original_run = self.runner.side_effect
+        def mutate(args, **kwargs):
+            result = original_run(args, **kwargs)
+            task.write_text("Acceptance: expanded standard.", encoding="utf-8")
+            return result
+        self.runner.side_effect = mutate
+        self.assertEqual(self.invoke("--task", task.name), 1)
+        self.assertIn("发生变化", self.stderr.getvalue())
+
+    def test_implicit_task_created_during_review_invalidates_approval(self):
+        task = Path(self.target) / "docs/task.md"
+        self.response(self.native_report())
+        original_run = self.runner.side_effect
+        def mutate(args, **kwargs):
+            result = original_run(args, **kwargs)
+            task.parent.mkdir()
+            task.write_text("New acceptance criteria.", encoding="utf-8")
+            return result
+        self.runner.side_effect = mutate
+        self.assertEqual(self.invoke(), 1)
+
+    def test_large_task_does_not_expand_windows_command_line(self):
+        task = Path(self.target) / "task.md"
+        content = "验收：" + "x" * 40000
+        task.write_text(content, encoding="utf-8")
+        self.response(self.native_report())
+        self.assertEqual(self.invoke("--task", task.name), 0)
+        self.assertLess(len(subprocess.list2cmdline(self.runner.call_args.args[0])), 4096)
+        self.assertIn(content, self.runner.call_args.kwargs["input"])
 
     def test_missing_raw_report_never_uses_rendered_approval(self):
         self.runner.side_effect = None

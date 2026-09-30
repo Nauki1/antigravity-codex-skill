@@ -49,6 +49,7 @@ python <SKILL_PATH>/scripts/codex_loop.py info [--project <TARGET_DIR>]
 ### 1. 正向协同闭环 (Antigravity 发起 ➔ Codex 规划 ➔ Antigravity 实施 ➔ Codex 审查)
 
 #### Step 1: 架构深度规划 (Codex Plan)
+任务文档必须写清目标、可验证的验收标准、支持范围、不做事项和验收命令；未确认假设保持待确认，不转成强制要求。可参考 [任务模板](docs/task-template.md)。实施与审查沿用这份标准，扩大范围需用户授权。
 调用 Codex CLI 无头推理，根据项目实际代码分析需求并生成技术设计与步骤 Checklist：
 ```bash
 python <SKILL_PATH>/scripts/codex_loop.py plan "<TASK_REQUIREMENT>" [--out docs/task.md] [--project <TARGET_DIR>]
@@ -64,6 +65,7 @@ Codex 审查工作区未提交变更，拦截逻辑漏洞与回归隐患：
 ```bash
 python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 ```
+审查默认读取目标工程的 `docs/task.md`（存在时），也可用 `--task <PATH>` 指定验收标准。路径相对目标工程解析；显式文件缺失、为空或无法读取时不启动审查。任务内容以快照传入，审查期间标准变化则本次批准失效。可选优化和支持范围之外的需求不成为强制返工任务；相关安全、数据完整性及已有功能回归仍须检查。
 - 返回码 `0`：有效结论为 **APPROVED**，审查通过。
 - 返回码 `2`：有效结论为 **NEEDS_FIX**，进入修复循环。
 - 返回码 `1`：调用失败或报告没有有效结论，保持待审查，不能提交交付。
