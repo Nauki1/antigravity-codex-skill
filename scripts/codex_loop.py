@@ -107,7 +107,7 @@ def run_plan(prompt, model=None, reasoning_effort="xhigh", target_file=None):
     current_info = get_current_info()
     effective_model = model or current_info.get("active_model", "gpt-6.1-sol")
 
-    cmd = [CODEX_BIN, "exec", "--skip-git-repo-check"]
+    cmd = [CODEX_BIN, "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only"]
     if effective_model:
         cmd.extend(["-c", f'model="{effective_model}"'])
     if reasoning_effort:
@@ -122,7 +122,7 @@ def run_plan(prompt, model=None, reasoning_effort="xhigh", target_file=None):
     cmd.append(full_prompt)
 
     print(f"[*] 启动 Codex 规划中 (Model: {effective_model}, Reasoning: {reasoning_effort})...", file=sys.stderr)
-    res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+    res = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace")
 
     if res.returncode != 0:
         err_msg = res.stderr or ""
@@ -154,7 +154,7 @@ def run_review(instructions=None, model=None, base=None):
         cmd.append(instructions)
 
     print(f"[*] 启动 Codex 代码审查中 (Model: {effective_model})...", file=sys.stderr)
-    res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+    res = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace")
 
     if res.returncode != 0:
         err_msg = res.stderr or ""
