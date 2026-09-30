@@ -188,6 +188,7 @@ AGENTS_TEMPLATE = """# Dual-Agent Workspace Constitution (Antigravity & Codex)
    - 任何改动完成前，必须在终端实际运行对应的构建或测试脚本，且退出码（Exit Code）为 0 方可视为通过。
 3. **关键任务异构审查 (Heterogeneous Red Teaming)**：
    - 必须修复的问题须给出稳定 ID、位置、支持范围内的触发条件、预期与实际行为、影响，以及复现或确定的可达代码证据。未经核验的猜测保持待验证，不直接派给实施方修改。
+   - 实施方可针对问题 ID 提交修复或反驳证据；审查方须独立核验并逐项裁定。证据无法解决争议时交由用户决定，不自动批准或继续返工。
    - 涉及核心算法、架构改造、底层鉴权或跨模块调用的变更，必须调用 `codex review` 获得 `APPROVED` 判定。
    - 审查报告先给出发现和理由，最后一行只写 `APPROVED`（无待修复问题）或 `NEEDS_FIX`（存在待修复问题）。
    - 结论只出现一次，不放入引用、代码块或示例；未完成审查时不得输出批准。
@@ -325,6 +326,16 @@ REVIEW_PROTOCOL = (
     "Do not classify speculation or preferences as verified defects. If a "
     "potential material defect cannot be established, report an incomplete review "
     "with the remaining uncertainty rather than assigning unverified repair work. "
+    "Also include adjudications (an array, empty without implementer responses or "
+    "prior unresolved disputes). Carry forward every prior needs_human ID and "
+    "adjudicate it explicitly; never silently drop an unresolved dispute. "
+    "For each supplied response, independently check its evidence against code "
+    "and tests. Return exactly one decision with finding_id, decision "
+    "(closed, confirmed, or needs_human), reason, and evidence, all nonempty "
+    "strings. Closed IDs must not remain findings; confirmed IDs must remain. "
+    "Do not accept a rebuttal merely because the implementer asserts it. "
+    "If evidence cannot resolve the dispute, use needs_human; do not assign more "
+    "repairs or claim approval. Retain supplied finding IDs. "
     "Do not wrap this object in Markdown or add text outside it. If review could "
     "not be completed, set review_complete to false. The wrapper preserves this "
     "report and emits APPROVED only for a complete, correct review with zero findings; "
@@ -349,23 +360,24 @@ class ReviewError(RuntimeError):
         self.output = output
 
 
+def unique_json_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate field: {key}")
+        result[key] = value
+    return result
+
+
 def parse_review_report(output):
     """Validate the explicit envelope exported by the native review renderer."""
-    def unique_fields(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate field: {key}")
-            result[key] = value
-        return result
-
     try:
-        report, end = json.JSONDecoder(object_pairs_hook=unique_fields).raw_decode(output.lstrip())
+        report, end = json.JSONDecoder(object_pairs_hook=unique_json_fields).raw_decode(output.lstrip())
     except (ValueError, TypeError) as exc:
         raise ReviewError("审查协议 JSON 不完整或包含重复字段，未取得批准。", output) from exc
     required = {"protocol", "review_complete", "findings_count", "overall_correctness", "reason", "findings"}
     if (
-        not isinstance(report, dict) or set(report) != required
+        not isinstance(report, dict) or not required <= set(report) or set(report) - required - {"adjudications"}
         or report["protocol"] != "codex-loop-review-v2"
         or report["review_complete"] is not True
         or type(report["findings_count"]) is not int or report["findings_count"] < 0
@@ -386,6 +398,21 @@ def parse_review_report(output):
         ):
             raise ReviewError("审查发现缺少可核验的完整证据或 ID 重复，保持待审查。", output)
         ids.add(finding["id"])
+    decisions = report.get("adjudications", [])
+    if not isinstance(decisions, list):
+        raise ReviewError("争议裁定格式无效，保持待审查。", output)
+    decided = set()
+    for decision in decisions:
+        if (
+            not isinstance(decision, dict) or set(decision) != {"finding_id", "decision", "reason", "evidence"}
+            or any(not isinstance(value, str) or not value.strip() for value in decision.values())
+            or decision["decision"] not in ("closed", "confirmed", "needs_human")
+            or decision["finding_id"] in decided
+            or (decision["decision"] == "closed" and decision["finding_id"] in ids)
+            or (decision["decision"] == "confirmed" and decision["finding_id"] not in ids)
+        ):
+            raise ReviewError("争议裁定缺少证据、重复或与当前发现矛盾，保持待审查。", output)
+        decided.add(decision["finding_id"])
     # The renderer appends native findings after overall_explanation. Such text
     # must never be ignored when a zero-findings approval is claimed.
     trailer = output.lstrip()[end:].strip()
@@ -411,13 +438,15 @@ def parse_review_report(output):
         expected_rows = [normalize_row(f"- {finding['title']} — {finding['location']}") for finding in report["findings"]]
         if sorted(rows) != sorted(expected_rows):
             raise ReviewError("原生问题与证据记录不对应，保持待审查。", output)
-    if not report["findings"] and report["overall_correctness"] == "patch is incorrect":
+    if not report["findings"] and report["overall_correctness"] == "patch is incorrect" and not any(item["decision"] == "needs_human" for item in decisions):
         raise ReviewError("整体结论错误但没有具体缺陷证据，保持待审查。", output)
     return report
 
 
 def parse_review_verdict(output):
     report = parse_review_report(output)
+    if any(item["decision"] == "needs_human" for item in report.get("adjudications", [])):
+        raise ReviewError("争议证据尚未达成结论，需用户决定；不批准或自动返工。", output)
     if report["findings_count"] or report["overall_correctness"] == "patch is incorrect":
         return "NEEDS_FIX"
     return "APPROVED"
@@ -440,7 +469,36 @@ def load_review_task(target, task_file=None):
     return path, hashlib.sha256(content).hexdigest(), text
 
 
-def run_review(instructions=None, model=None, base=None, target_project=None, task_file=None):
+def load_review_discussion(target, previous_review=None, response_file=None):
+    if response_file is not None and previous_review is None:
+        raise ReviewError("实施方回应必须与 --previous-review 一起提供。")
+    previous = load_review_task(target, previous_review) if previous_review is not None else None
+    response = load_review_task(target, response_file) if response_file is not None else None
+    prior = parse_review_report(previous[2]) if previous else None
+    replies = []
+    if response:
+        try:
+            data = json.loads(response[2], object_pairs_hook=unique_json_fields)
+        except (ValueError, TypeError) as exc:
+            raise ReviewError("实施方回应不是完整的 JSON。") from exc
+        if not isinstance(data, dict) or set(data) != {"responses"} or not isinstance(data["responses"], list) or not data["responses"]:
+            raise ReviewError("实施方回应必须包含非空 responses 列表。")
+        known = {item["id"] for item in prior["findings"]} | {item["finding_id"] for item in prior.get("adjudications", [])}
+        ids = set()
+        for reply in data["responses"]:
+            if (
+                not isinstance(reply, dict) or set(reply) != {"finding_id", "position", "reason", "evidence"}
+                or any(not isinstance(value, str) or not value.strip() for value in reply.values())
+                or reply["position"] not in ("fixed", "disputed")
+                or reply["finding_id"] not in known or reply["finding_id"] in ids
+            ):
+                raise ReviewError("实施方回应缺少证据、ID 未知或重复。")
+            ids.add(reply["finding_id"])
+        replies = data["responses"]
+    return previous, response, prior, replies
+
+
+def run_review(instructions=None, model=None, base=None, target_project=None, task_file=None, previous_review=None, response_file=None, output_file=None):
     """Review one scope; return (approved, raw output), or raise ReviewError."""
     if base is not None and instructions is not None:
         raise ReviewError("--base 与 --instructions 不能同时使用。")
@@ -450,6 +508,11 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
         raise ReviewError("--instructions 不能为空。")
     target = resolve_target_project(target_project)
     task = load_review_task(target, task_file)
+    previous, response, prior, replies = load_review_discussion(target, previous_review, response_file)
+    saved_path = (target / output_file).resolve() if output_file is not None else None
+    criteria_path = (target / (task_file if task_file is not None else "docs/task.md")).resolve()
+    if saved_path and (saved_path == criteria_path or any(saved_path == snapshot[0].resolve() for snapshot in (previous, response) if snapshot)):
+        raise ReviewError("审查输出不能覆盖任务、上轮报告或实施方回应。")
     current_info = get_current_info(target_project=target)
     effective_model = model or current_info.get("active_model", "gpt-6.1-sol")
 
@@ -480,7 +543,8 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
         f"Agreed task snapshot ({task[0]}, SHA-256 {task[1]}):\n{task[2]}"
         if task else "No task document supplied. Use explicit user instructions and existing project guarantees; do not invent requirements."
     )
-    prompt = f"{scope}\n{REVIEW_CRITERIA}\n{task_context}\nAdditional review instructions:\n{instructions or ''}\n\n{REVIEW_PROTOCOL}"
+    discussion = f"Previous validated review:\n{json.dumps(prior, ensure_ascii=False)}\nImplementer responses:\n{json.dumps(replies, ensure_ascii=False)}" if prior else "No previous review or implementer responses supplied."
+    prompt = f"{scope}\n{REVIEW_CRITERIA}\n{task_context}\n{discussion}\nAdditional review instructions:\n{instructions or ''}\n\n{REVIEW_PROTOCOL}"
     cmd.extend(["--", "-"])
 
     print(f"[*] 启动 Codex 代码审查中 (Project: {target}, Model: {effective_model})...", file=sys.stderr)
@@ -513,6 +577,24 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
         raise ReviewError(f"审查后任务验收标准无法读取: {exc}", output) from exc
     if (latest_task[1] if latest_task else None) != (task[1] if task else None):
         raise ReviewError("审查期间任务验收标准发生变化，需重新审查。", output)
+
+    for snapshot in (previous, response):
+        if snapshot:
+            try:
+                current = load_review_task(target, str(snapshot[0]))
+            except ReviewError as exc:
+                raise ReviewError(f"审查后讨论证据无法读取: {exc}", output) from exc
+            if current[1] != snapshot[1]:
+                raise ReviewError("审查期间上轮报告或实施方回应发生变化，需重新审查。", output)
+    report = parse_review_report(output)
+    reply_ids = {item["finding_id"] for item in replies}
+    reply_ids |= {item["finding_id"] for item in (prior or {}).get("adjudications", []) if item["decision"] == "needs_human"}
+    decision_ids = {item["finding_id"] for item in report.get("adjudications", [])}
+    if decision_ids != reply_ids:
+        raise ReviewError("实施方回应未逐项裁定，或存在未经请求的裁定。", output)
+    if saved_path:
+        saved_path.parent.mkdir(parents=True, exist_ok=True)
+        saved_path.write_text(output, encoding="utf-8")
 
     verdict = parse_review_verdict(output)
     is_approved = verdict == "APPROVED"
@@ -595,6 +677,9 @@ def build_parser():
     review_scope.add_argument("--instructions", "-i", help="Custom review instructions for uncommitted changes (conflicts with --base)")
     p_review.add_argument("--model", "-m", help="Specific review model")
     p_review.add_argument("--task", "-t", help="Acceptance criteria file (default: target docs/task.md if present)")
+    p_review.add_argument("--previous-review", help="Previous raw review report")
+    p_review.add_argument("--response", help="Evidence-backed implementer response JSON")
+    p_review.add_argument("--out", "-o", help="Save the raw report without the wrapper verdict")
     review_scope.add_argument("--base", "-b", help="Base branch (conflicts with --instructions)")
 
     return parser
@@ -632,6 +717,9 @@ def main(argv=None):
                 base=args.base,
                 target_project=target_project,
                 task_file=args.task,
+                previous_review=args.previous_review,
+                response_file=args.response,
+                output_file=args.out,
             )
         except (ReviewError, OSError) as exc:
             print(f"[!] {exc}", file=sys.stderr)

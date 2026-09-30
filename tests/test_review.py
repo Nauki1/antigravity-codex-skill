@@ -356,6 +356,108 @@ class TestReview(unittest.TestCase):
         self.assertLess(len(subprocess.list2cmdline(self.runner.call_args.args[0])), 4096)
         self.assertIn(content, self.runner.call_args.kwargs["input"])
 
+    def discussion(self, replies=None):
+        previous = Path(self.target) / "previous.txt"
+        response = Path(self.target) / "response.json"
+        previous.write_text(self.native_report(findings=[self.finding()], overall_correctness="patch is incorrect"), encoding="utf-8")
+        response.write_text(json.dumps({"responses": replies if replies is not None else [{"finding_id": "F1", "position": "disputed", "reason": "The reported path is unreachable.", "evidence": "A guard rejects empty input before the return expression."}]}), encoding="utf-8")
+        return previous, response
+
+    def decision(self, **changes):
+        decision = {"finding_id": "F1", "decision": "closed", "reason": "Checked the implementer evidence.", "evidence": "The code path and regression test rule out the claim."}
+        decision.update(changes)
+        return decision
+
+    def test_verified_rebuttal_can_close_finding_and_save_raw_report(self):
+        previous, response = self.discussion()
+        output = self.native_report(adjudications=[self.decision()])
+        self.response(output)
+        saved = Path(self.target) / "reviews/result.txt"
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name, "--out", str(saved)), 0)
+        self.assertEqual(saved.read_text(encoding="utf-8"), output)
+        self.assertIn("The reported path is unreachable", self.runner.call_args.kwargs["input"])
+
+    def test_confirmed_finding_after_rebuttal_requires_fix(self):
+        previous, response = self.discussion()
+        self.response(self.native_report(findings=[self.finding()], adjudications=[self.decision(decision="confirmed")]))
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 2)
+
+    def test_unresolved_dispute_stays_pending_and_is_saved(self):
+        previous, response = self.discussion()
+        output = self.native_report(adjudications=[self.decision(decision="needs_human")])
+        self.response(output)
+        saved = Path(self.target) / "pending.txt"
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name, "--out", saved.name), 1)
+        self.assertEqual(saved.read_text(encoding="utf-8"), output)
+
+    def test_unanswered_response_and_unexpected_decision_fail_closed(self):
+        previous, response = self.discussion()
+        for decisions in ([], [self.decision(finding_id="unknown")]):
+            with self.subTest(decisions=decisions):
+                self.response(self.native_report(adjudications=decisions))
+                self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 1)
+
+    def test_malformed_unknown_and_duplicate_responses_stop_before_launch(self):
+        for replies in ([], [{"finding_id": "F1"}], [{"finding_id": "F9", "position": "disputed", "reason": "reason", "evidence": "proof"}], [{"finding_id": "F1", "position": "disputed", "reason": "reason", "evidence": ""}]):
+            with self.subTest(replies=replies):
+                previous, response = self.discussion(replies)
+                self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 1)
+                self.runner.assert_not_called()
+        previous, response = self.discussion()
+        data = json.loads(response.read_text(encoding="utf-8"))
+        data["responses"] *= 2
+        response.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 1)
+        self.runner.assert_not_called()
+
+    def test_response_requires_previous_review_and_output_cannot_overwrite_inputs(self):
+        previous, response = self.discussion()
+        self.assertEqual(self.invoke("--response", response.name), 1)
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--out", previous.name), 1)
+        self.assertEqual(self.invoke("--out", "docs/task.md"), 1)
+        self.runner.assert_not_called()
+
+    def test_contradictory_or_unsubstantiated_adjudications_are_invalid(self):
+        outputs = [
+            self.native_report(adjudications=[self.decision(evidence="")]),
+            self.native_report(adjudications=[self.decision(), self.decision()]),
+            self.native_report(adjudications=[self.decision(decision="confirmed")]),
+            self.native_report(findings=[self.finding()], adjudications=[self.decision()]),
+        ]
+        for output in outputs:
+            with self.subTest(output=output):
+                self.response(output)
+                self.assertEqual(self.invoke(), 1)
+
+    def test_response_changed_during_review_invalidates_adjudication(self):
+        previous, response = self.discussion()
+        self.response(self.native_report(adjudications=[self.decision()]))
+        original_run = self.runner.side_effect
+        def mutate(args, **kwargs):
+            result = original_run(args, **kwargs)
+            response.write_text("{}", encoding="utf-8")
+            return result
+        self.runner.side_effect = mutate
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 1)
+
+    def test_prior_unresolved_dispute_cannot_disappear_without_response(self):
+        previous = Path(self.target) / "pending.txt"
+        previous.write_text(self.native_report(adjudications=[self.decision(decision="needs_human")]), encoding="utf-8")
+        self.response(self.native_report())
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+        self.response(self.native_report(adjudications=[self.decision(decision="needs_human")]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+        self.assertIn("需用户决定", self.stderr.getvalue())
+
+    def test_partial_response_cannot_drop_another_unresolved_dispute(self):
+        previous, response = self.discussion([{"finding_id": "F2", "position": "fixed", "reason": "Fixed", "evidence": "Passing test"}])
+        previous.write_text(self.native_report(findings=[self.finding(id="F2")], adjudications=[self.decision(decision="needs_human"), self.decision(finding_id="F2", decision="confirmed")]), encoding="utf-8")
+        self.response(self.native_report(adjudications=[self.decision(finding_id="F2")]))
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 1)
+        self.response(self.native_report(adjudications=[self.decision(finding_id="F2"), self.decision(decision="needs_human")]))
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--response", response.name), 1)
+        self.assertIn("需用户决定", self.stderr.getvalue())
+
     def test_missing_raw_report_never_uses_rendered_approval(self):
         self.runner.side_effect = None
         self.runner.return_value = subprocess.CompletedProcess([], 0, "APPROVED", "")

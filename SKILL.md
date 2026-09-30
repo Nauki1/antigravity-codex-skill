@@ -81,9 +81,9 @@ python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 包装器负责输出项目约定的 `APPROVED` / `NEEDS_FIX` 末行结论。协议通过调用提示词传入，已有目标工程无需修改规则来适配审批解析。不能把 CLI 执行成功、自然语言措辞、否定、引用或代码示例中的批准词当成批准。
 
 #### Step 4: 修复闭环 (Remediation Loop)
-- Antigravity 读取审查反馈意见。
-- 遵循最小修改原则修复缺陷并复测。
-- 重新运行 `review` 直至获得 `APPROVED` 判定。
+- 首次审查用 `--out reviews/first.txt` 保存原始报告。
+- Antigravity 修复已核验问题并复测，或提交有证据的反驳；回应 JSON 引用 `finding_id`，包含 `position`（`fixed` / `disputed`）、`reason` 与 `evidence`。
+- 复审用 `--previous-review reviews/first.txt --response reviews/response.json --out reviews/second.txt`，审查器逐项独立裁定 `closed` / `confirmed` / `needs_human`。证据未解决争议时返回 `1`，不批准或自动返工。具体格式见 [审查与收工规则](docs/review-policy.md)。
 
 ---
 

@@ -91,7 +91,7 @@ python scripts/codex_loop.py review
 必须修复的发现还需提供唯一稳定 ID、位置、触发条件、预期与实际行为、影响、可核验证据和核验状态。发现数量必须与证据记录一致；未经核验或没有具体证据的错误结论返回 `1`，保持待审查，避免把猜测直接转成返工任务。
 
 #### Step 4: 修复闭环 (Antigravity Fix)
-Antigravity 针对 Codex 的 Review 意见进行微调，再次运行 `review` 直至获得 `APPROVED`。
+Antigravity 针对已核验问题修复并复测，也可以提供证据反驳。首次审查用 `--out reviews/first.txt` 保存原始报告；复审用 `--previous-review reviews/first.txt --response reviews/response.json --out reviews/second.txt`。回应引用稳定问题 ID，并包含 `position`（`fixed` / `disputed`）、理由和证据，格式见 [审查与收工规则](docs/review-policy.md)。审查方独立裁定；证据未能解决的争议保持待决，不能自动批准或继续派发返工。
 
 #### Step 5: 会话归档沉淀 (Sync Session)
 将本次开发的重要讨论与结论一键归档到项目中：

@@ -17,3 +17,19 @@
 结果协议升级为 `codex-loop-review-v2`，包含与原生发现一一对应的证据记录。缺少字段、未经核验、ID 重复或数量不一致时，保持待审查，不能直接派发修改。只说整体错误却没有具体缺陷证据，也不产生返工指令。包装器验证证据契约，实际证据的真实性仍由审查器核对代码和测试。
 
 证据记录复制原生标题及绝对路径、行号范围。包装器核对 CLI 0.159.2 附加的问题列表；多出、缺失或替换条目均不产生修复判定。未知渲染格式保持待审查，不猜测其含义。
+
+## 第3版：允许举证回应
+
+首次审查用 `--out reviews/first.txt` 保存原始报告。实施方可提交 JSON 回应，每条包含 `finding_id`、`position`（`fixed` 或 `disputed`）、`reason` 和 `evidence`。回应必须引用上轮报告中的 ID，并提供修复或反驳证据，不能只说“已经满足”。
+
+```json
+{"responses": [{"finding_id": "F1", "position": "disputed", "reason": "该输入不在约定支持范围内", "evidence": "任务文档的支持范围及入口校验路径"}]}
+```
+
+```bash
+python scripts/codex_loop.py review --previous-review reviews/first.txt --response reviews/response.json --out reviews/second.txt
+```
+
+审查方独立核对代码和测试，逐项给出有理由、有证据的裁定：`closed`（修复完成或原指控不成立）、`confirmed`（问题仍成立）、`needs_human`（证据无法解决分歧）。缺失、重复、未知或自相矛盾的裁定不放行；未解决争议返回 `1`，不批准，也不自动要求继续返工。结构有效的待裁定报告仍可保存供下一次讨论使用。
+
+上轮报告与回应按内容快照传入，审查中变化会使结论失效。输出不能覆盖任务文档或讨论输入。包装器保证裁定契约完整；裁定的事实依据仍由独立审查器核验。

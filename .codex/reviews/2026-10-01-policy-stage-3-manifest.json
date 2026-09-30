@@ -1,0 +1,19 @@
+{
+  "stage": 3,
+  "base_head": "c75d1e129667998582bfee1d4724bef3ea20ac41",
+  "files": {
+    "AGENTS.md": "b48e06ac795bbaaaa075e39eb8653d8c963765f49e9fccf4973dc1334fc3bb6e",
+    "README.md": "5acb50904670978c695a06ca4bac8274bba2c07945be6bfa9033d1138eb5da7a",
+    "SKILL.md": "08f66e30d9792855e2f88918bb93be5af2358c2365e55ac68ef82a0d9bfd0955",
+    "docs/review-policy.md": "4c0c36eeae4c6c2dcdf1045fb84a7cbcc4e9f03f362115c3d3f877d9793609ef",
+    "scripts/codex_loop.py": "ff9a0ac592fa6c08075c2e16c6e461d0b9e5924116f73429ae7cf2f17c53cc1b",
+    "tests/test_review.py": "dc5a33101ee2212179482a33c2359c578719977b779ecc1ffa5dcae6ef10e317"
+  },
+  "test_count": 56,
+  "test_exit_code": 0,
+  "test_command": "python -B -m unittest discover -s tests -p \"test_*.py\" -v",
+  "scope": "Allow evidence-backed implementer responses and independent adjudication; disputes unresolved by evidence require a human decision, never automatic approval or blind remediation.",
+  "review_exit_code": 0,
+  "review_model_requested": "gpt-6.1-sol",
+  "review_result_sha256": "9b7f12d3661b8fae1689f2a22ecec1d7ff3604e9229ebc43af2c2afbf6c05df9"
+}
