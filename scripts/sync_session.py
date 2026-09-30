@@ -235,6 +235,7 @@ def main():
     parser.add_argument("--title", "-t", default="session-notes", help="Title / topic of the session")
     parser.add_argument("--summary", "-s", help="Custom executive summary text")
     parser.add_argument("--out", "-o", help="Target output file path")
+    parser.add_argument("--project", "-P", help="Target project root directory (default: current workspace / git root)")
     args = parser.parse_args()
 
     if args.list:
@@ -244,6 +245,15 @@ def main():
             print(f"[{s['time_str']}] {s['conv_id']}\n  -> {s['preview']}\n")
         return
 
+    # Import target project resolution from codex_loop
+    try:
+        from codex_loop import resolve_target_project
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from codex_loop import resolve_target_project
+
+    target_project = resolve_target_project(args.project)
+
     conv_id, transcript_path = find_transcript(conv_id=args.conv_id)
     if not transcript_path or not transcript_path.exists():
         target_name = args.conv_id or "latest"
@@ -252,8 +262,12 @@ def main():
 
     now_date = datetime.date.today().strftime("%Y-%m-%d")
     clean_title = args.title.replace(" ", "-").lower()
-    default_out = Path(".agents") / "sessions" / f"{now_date}-{clean_title}.md"
-    target_out = Path(args.out) if args.out else default_out
+
+    if args.out:
+        out_p = Path(args.out)
+        target_out = out_p if out_p.is_absolute() else target_project / out_p
+    else:
+        target_out = target_project / ".agents" / "sessions" / f"{now_date}-{clean_title}.md"
 
     records = parse_transcript(transcript_path)
     export_session_to_markdown(conv_id, records, args.title, target_out, summary=args.summary)
@@ -261,3 +275,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
