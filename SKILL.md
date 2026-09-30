@@ -72,7 +72,7 @@ python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 
 审查模式互斥：默认审查 staged、unstaged 和 untracked 变更；`--base <REF>` 先解析 REF 与 HEAD 的 merge base，再审查其后的已跟踪差异；`--instructions "审查重点"` 增加未提交变更的审查重点。`--base` 与 `--instructions` 不能组合。底层统一使用原生自定义审查 PROMPT，以便附加结果协议；不与原生 `--base` / `--uncommitted` 标志混用。
 
-原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出审查协议 JSON（协议版本、审查完成状态、发现数量、整体正确性及理由）。CLI 渲染此解释并附加发现详情。包装器仅在审查完整、发现数量为零、整体结论为 `patch is correct` 且没有额外内容时批准。有发现或整体结论错误时需修复；结构缺失、字段重复和类型错误均不放行。
+原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出当前 `codex-loop-review-v3` 协议 JSON。CLI 渲染此解释并附加发现详情。审查完成、验收达标、整体正确、没有已核验实质缺陷或待决疑点/争议时批准；可选建议放入 `advisories`，可带建议收工。未核验实质疑点放入 `uncertainties`，不能直接派发返工。结构缺失、字段重复、类型错误或未知附加内容不放行。v2 仅可作历史输入。
 
 每个发现必须包含唯一稳定 ID、位置、具体触发条件、预期行为、实际行为、影响、复现或确定的可达代码证据，以及明确的核验状态。包装器检查证据字段与数量的一致性；证据缺失、未经核验、ID 重复，或只给出“整体错误”却无具体问题时，保持待审查，不自动要求返工。字段检查不能替代审查器对证据真实性的核验。
 
@@ -85,6 +85,8 @@ python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 - Antigravity 修复已核验问题并复测，或提交有证据的反驳；回应 JSON 引用 `finding_id`，包含 `position`（`fixed` / `disputed`）、`reason` 与 `evidence`。
 - 复审用 `--previous-review reviews/first.txt --response reviews/response.json --out reviews/second.txt`，审查器逐项独立裁定 `closed` / `confirmed` / `needs_human`。证据未解决争议时返回 `1`，不批准或自动返工。具体格式见 [审查与收工规则](docs/review-policy.md)。
 - 后续使用最近报告聚焦复审上轮问题、修复及相关回归，延续全部旧 ID 和关闭记录。已关闭问题须用 `reopened` 和额外 `new_evidence` 明确重开；范围内新发现仍需核验证据，不追加无关优化要求。
+- 自动修复须用 `fix --review reviews/first.txt --task docs/task.md`，读取 `review --out` 保存的原报告与 `.context.json`。默认最多2轮，配置可在新周期前设置；启动前计数，失败或中断也消耗轮次，同一审查不得重复派发。
+- `fix` 返回 `3` 表示到达上限、验收变化或存在待决问题，停止并交由用户决定。不得改用 `exec-agy`、删除计数、换任务路径或调高参数绕过。新周期须用户明确授权并记录；工具不自动重置。返回 `0` 的实施执行仍须复测与独立审查，不等同交付批准。
 
 ---
 
@@ -95,6 +97,8 @@ python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 python <SKILL_PATH>/scripts/codex_loop.py exec-agy [--task docs/task.md] [--project <TARGET_DIR>]
 ```
 Antigravity CLI (`agy`) 将在目标工程后台以静默无头模式（`--mode=accept-edits`）实施代码并执行测试，完成后交还 Codex 执行复审。
+
+`exec-agy` 用于初次实施。审查后自动返工使用上面的 `fix` 入口和持久化预算，不能重复调用初次实施入口绕过上限。
 
 ---
 

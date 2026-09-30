@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 # Ensure UTF-8 stdout/stderr on Windows
@@ -190,6 +191,7 @@ AGENTS_TEMPLATE = """# Dual-Agent Workspace Constitution (Antigravity & Codex)
    - 必须修复的问题须给出稳定 ID、位置、支持范围内的触发条件、预期与实际行为、影响，以及复现或确定的可达代码证据。未经核验的猜测保持待验证，不直接派给实施方修改。
    - 实施方可针对问题 ID 提交修复或反驳证据；审查方须独立核验并逐项裁定。证据无法解决争议时交由用户决定，不自动批准或继续返工。
    - 复审聚焦上轮问题、修复及相关回归，延续全部旧 ID 和关闭记录；已关闭问题只有经核验的新证据才可明确重开，不能换 ID 重复派发。
+   - 验收达标、无已核验实质缺陷和待决疑点/争议时允许带建议项批准。自动修复遵守持久化轮次上限；到上限交由用户决定，不自动批准、重置或绕过，实施执行成功仍须复测与审查。
    - 涉及核心算法、架构改造、底层鉴权或跨模块调用的变更，必须调用 `codex review` 获得 `APPROVED` 判定。
    - 审查报告先给出发现和理由，最后一行只写 `APPROVED`（无待修复问题）或 `NEEDS_FIX`（存在待修复问题）。
    - 结论只出现一次，不放入引用、代码块或示例；未完成审查时不得输出批准。
@@ -206,7 +208,7 @@ version = "1.0.0"
 [collaboration]
 mode = "lightweight"
 headless_agy = true
-max_fix_rounds = 3
+max_fix_rounds = 2
 review_on_critical_changes = true
 
 [testing]
@@ -313,11 +315,15 @@ REVIEW_PROTOCOL = (
     "Keep your native review JSON schema and all actionable findings. "
     "The CLI renders overall_explanation but hides the other native fields. "
     "Therefore overall_explanation MUST be a string containing exactly one JSON "
-    "object with these fields: protocol (\"codex-loop-review-v2\"), review_complete "
+    "object with these fields: protocol (\"codex-loop-review-v3\"), review_complete "
     "(boolean), findings_count (integer equal to the native findings list length), "
     "overall_correctness (same as the native overall_correctness: \"patch is correct\" "
     "or \"patch is incorrect\"), reason (nonempty explanation string), findings "
-    "(one evidence record per native finding, with the same count). Every record "
+    "(one evidence record per native finding, with the same count), acceptance_met "
+    "(boolean), advisories (array of nonempty strings for optional suggestions), "
+    "and uncertainties (array of nonempty strings for unresolved material facts). "
+    "Native findings contain only verified defects requiring repair; optional "
+    "suggestions belong in advisories and do not block approval. Every record "
     "must contain nonempty strings id, title, location, trigger, expected, actual, "
     "impact, evidence, plus verified=true. Use unique stable IDs such as F1. "
     "Copy each native title exactly; location must match its rendered absolute "
@@ -325,8 +331,8 @@ REVIEW_PROTOCOL = (
     "Describe a concrete supported triggering condition, the expected and actual "
     "behavior, material impact, and reproduction or a definite reachable code path. "
     "Do not classify speculation or preferences as verified defects. If a "
-    "potential material defect cannot be established, report an incomplete review "
-    "with the remaining uncertainty rather than assigning unverified repair work. "
+    "potential material defect cannot be established, list it in uncertainties "
+    "rather than assigning unverified repair work or claiming approval. "
     "Also include adjudications (an array, empty without implementer responses or "
     "prior review). Carry forward every prior finding and adjudication ID and "
     "adjudicate it explicitly, including closed and unresolved IDs. "
@@ -344,7 +350,9 @@ REVIEW_PROTOCOL = (
     "retain it after closure so a claim cannot return under a different ID. "
     "Do not wrap this object in Markdown or add text outside it. If review could "
     "not be completed, set review_complete to false. The wrapper preserves this "
-    "report and emits APPROVED only for a complete, correct review with zero findings; "
+    "report and emits APPROVED only for a complete, correct review with acceptance_met "
+    "true, zero findings and no unresolved uncertainties or disputes; advisories "
+    "may remain. "
     "otherwise it emits NEEDS_FIX or fails without approval."
 )
 
@@ -393,6 +401,23 @@ class ReviewError(RuntimeError):
         self.output = output
 
 
+class HumanDecisionRequired(ReviewError):
+    """Automatic remediation must stop; exhaustion is never an approval."""
+
+
+def atomic_json_write(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def unique_json_fields(pairs):
     result = {}
     for key, value in pairs:
@@ -402,22 +427,30 @@ def unique_json_fields(pairs):
     return result
 
 
-def parse_review_report(output):
+def parse_review_report(output, require_current=False):
     """Validate the explicit envelope exported by the native review renderer."""
     try:
         report, end = json.JSONDecoder(object_pairs_hook=unique_json_fields).raw_decode(output.lstrip())
     except (ValueError, TypeError) as exc:
         raise ReviewError("审查协议 JSON 不完整或包含重复字段，未取得批准。", output) from exc
     required = {"protocol", "review_complete", "findings_count", "overall_correctness", "reason", "findings"}
+    if isinstance(report, dict) and report.get("protocol") == "codex-loop-review-v3":
+        required |= {"acceptance_met", "advisories", "uncertainties"}
     if (
         not isinstance(report, dict) or not required <= set(report) or set(report) - required - {"adjudications", "history"}
-        or report["protocol"] != "codex-loop-review-v2"
+        or report["protocol"] not in ("codex-loop-review-v2", "codex-loop-review-v3")
+        or (require_current and report["protocol"] != "codex-loop-review-v3")
         or report["review_complete"] is not True
         or type(report["findings_count"]) is not int or report["findings_count"] < 0
         or report["overall_correctness"] not in ("patch is correct", "patch is incorrect")
         or not isinstance(report["reason"], str) or not report["reason"].strip()
     ):
         raise ReviewError("审查协议缺少有效的完整结论，未取得批准。", output)
+    if report["protocol"] == "codex-loop-review-v3" and (
+        type(report["acceptance_met"]) is not bool
+        or any(not isinstance(report[key], list) or any(not isinstance(item, str) or not item.strip() for item in report[key]) for key in ("advisories", "uncertainties"))
+    ):
+        raise ReviewError("验收、建议或待验证记录无效，保持待审查。", output)
     if not isinstance(report["findings"], list) or len(report["findings"]) != report["findings_count"]:
         raise ReviewError("审查发现数量与证据记录不一致，未取得批准。", output)
     finding_fields = {"id", "title", "location", "trigger", "expected", "actual", "impact", "evidence", "verified"}
@@ -479,7 +512,7 @@ def parse_review_report(output):
         expected_rows = [normalize_review_location(f"- {finding['title']} — {finding['location']}") for finding in report["findings"]]
         if sorted(rows) != sorted(expected_rows):
             raise ReviewError("原生问题与证据记录不对应，保持待审查。", output)
-    if not report["findings"] and report["overall_correctness"] == "patch is incorrect" and not any(item["decision"] == "needs_human" for item in decisions):
+    if not report["findings"] and report["overall_correctness"] == "patch is incorrect" and not report.get("uncertainties") and not any(item["decision"] == "needs_human" for item in decisions):
         raise ReviewError("整体结论错误但没有具体缺陷证据，保持待审查。", output)
     return report
 
@@ -488,8 +521,12 @@ def parse_review_verdict(output):
     report = parse_review_report(output)
     if any(item["decision"] == "needs_human" for item in report.get("adjudications", [])):
         raise ReviewError("争议证据尚未达成结论，需用户决定；不批准或自动返工。", output)
+    if report.get("uncertainties"):
+        raise ReviewError("存在未核验的实质疑点，保持待验证，不批准或自动返工。", output)
     if report["findings_count"] or report["overall_correctness"] == "patch is incorrect":
         return "NEEDS_FIX"
+    if report.get("acceptance_met", True) is not True:
+        raise ReviewError("验收未达标且没有已核验的具体修复问题，保持待决。", output)
     return "APPROVED"
 
 
@@ -555,8 +592,9 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
     task = load_review_task(target, task_file)
     previous, response, prior, replies = load_review_discussion(target, previous_review, response_file)
     saved_path = (target / output_file).resolve() if output_file is not None else None
+    context_path = Path(str(saved_path) + ".context.json") if saved_path else None
     criteria_path = (target / (task_file if task_file is not None else "docs/task.md")).resolve()
-    if saved_path and (saved_path == criteria_path or any(saved_path == snapshot[0].resolve() for snapshot in (previous, response) if snapshot)):
+    if saved_path and any(path.resolve() == criteria_path or any(path.resolve() == snapshot[0].resolve() for snapshot in (previous, response) if snapshot) for path in (saved_path, context_path)):
         raise ReviewError("审查输出不能覆盖任务、上轮报告或实施方回应。")
     current_info = get_current_info(target_project=target)
     effective_model = model or current_info.get("active_model", "gpt-6.1-sol")
@@ -633,7 +671,7 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
                 raise ReviewError(f"审查后讨论证据无法读取: {exc}", output) from exc
             if current[1] != snapshot[1]:
                 raise ReviewError("审查期间上轮报告或实施方回应发生变化，需重新审查。", output)
-    report = parse_review_report(output)
+    report = parse_review_report(output, require_current=True)
     reply_ids = {item["finding_id"] for item in replies}
     reply_ids |= {item["finding_id"] for item in (prior or {}).get("adjudications", [])}
     reply_ids |= {item["id"] for item in (prior or {}).get("findings", [])}
@@ -661,7 +699,13 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
             raise ReviewError("同一上轮问题被更换 ID，保持待审查。", output)
     if saved_path:
         saved_path.parent.mkdir(parents=True, exist_ok=True)
-        saved_path.write_text(output, encoding="utf-8")
+        saved_path.write_bytes(output.encode("utf-8"))
+        atomic_json_write(context_path, {
+            "version": 1, "review_id": str(uuid.uuid4()), "target": os.path.normcase(str(target.resolve())),
+            "task_path": os.path.normcase(str(task[0].resolve())) if task else None,
+            "task_sha256": task[1] if task else None,
+            "report_sha256": hashlib.sha256(saved_path.read_bytes()).hexdigest(),
+        })
 
     verdict = parse_review_verdict(output)
     is_approved = verdict == "APPROVED"
@@ -683,6 +727,84 @@ def run_agy(task_file="docs/task.md", prompt=None, target_project=None):
     print(f"[*] 启动 Antigravity CLI (agy) 无头实施中 (Project: {target}, Task: {p})...", file=sys.stderr)
     res = subprocess.run(cmd, cwd=str(target), stdin=subprocess.DEVNULL)
     return res.returncode == 0
+
+
+def run_fix(review_file, task_file="docs/task.md", target_project=None):
+    """Dispatch one bounded repair attempt; execution success is not approval."""
+    target = resolve_target_project(target_project)
+    task = load_review_task(target, task_file)
+    saved = load_review_task(target, review_file)
+    report = parse_review_report(saved[2], require_current=True)
+    context_file = Path(str(saved[0]) + ".context.json")
+    try:
+        context = json.loads(context_file.read_text(encoding="utf-8"), object_pairs_hook=unique_json_fields)
+    except (OSError, ValueError) as exc:
+        raise ReviewError("修复需要 review --out 生成的原报告与上下文记录，请重新审查并保存。") from exc
+    fields = {"version", "review_id", "target", "task_path", "task_sha256", "report_sha256"}
+    if (
+        not isinstance(context, dict) or set(context) != fields or type(context["version"]) is not int or context["version"] != 1
+        or not isinstance(context["review_id"], str) or not context["review_id"].strip()
+        or context["target"] != os.path.normcase(str(target.resolve()))
+        or context["task_path"] != os.path.normcase(str(task[0].resolve())) or context["task_sha256"] != task[1]
+        or context["report_sha256"] != saved[1]
+    ):
+        raise ReviewError("报告上下文与当前工程、验收标准或报告内容不一致，请重新审查。")
+    if report.get("uncertainties") or any(item["decision"] == "needs_human" for item in report.get("adjudications", [])) or (not report["acceptance_met"] and not report["findings"]):
+        raise HumanDecisionRequired("报告存在待验证或待用户决定的问题，停止自动修复。")
+    if parse_review_verdict(saved[2]) == "APPROVED":
+        print("[*] 审查已通过，无需启动修复；建议项不产生返工。", file=sys.stderr)
+        return True
+    limit = 2
+    config_file = target / ".codex-loop.toml"
+    if config_file.exists():
+        try:
+            import tomllib
+            config = tomllib.loads(config_file.read_text(encoding="utf-8-sig"))
+            limit = config.get("collaboration", {}).get("max_fix_rounds", 2)
+        except (ImportError, OSError, ValueError, AttributeError) as exc:
+            raise ReviewError(f"无法读取修复预算配置（需要 Python 3.11+）: {exc}") from exc
+    if type(limit) is not int or limit < 1:
+        raise ReviewError("max_fix_rounds 必须是正整数。")
+    task_key = hashlib.sha256(os.path.normcase(str(task[0].resolve())).encode("utf-8")).hexdigest()
+    state_file = target / ".codex/codex-loop" / f"fix-{task_key}.json"
+    state = {"version": 1, "task_sha256": task[1], "limit": limit, "attempts": 0, "used_reviews": []}
+    if state_file.exists():
+        try:
+            state = json.loads(state_file.read_text(encoding="utf-8"), object_pairs_hook=unique_json_fields)
+        except (OSError, ValueError) as exc:
+            raise ReviewError("修复计数记录不可读，不能自动重置。") from exc
+        if (
+            not isinstance(state, dict) or set(state) != {"version", "task_sha256", "limit", "attempts", "used_reviews"}
+            or type(state["version"]) is not int or state["version"] != 1
+            or not isinstance(state["task_sha256"], str)
+            or type(state["limit"]) is not int or state["limit"] < 1
+            or type(state["attempts"]) is not int or not 0 <= state["attempts"] <= state["limit"]
+            or not isinstance(state["used_reviews"], list)
+            or any(not isinstance(item, str) or not item.strip() for item in state["used_reviews"])
+            or len(state["used_reviews"]) != state["attempts"] or len(set(state["used_reviews"])) != state["attempts"]
+        ):
+            raise ReviewError("修复计数记录无效，不能自动重置。")
+        if state["task_sha256"] != task[1]:
+            raise HumanDecisionRequired("验收标准已变化，需用户确认新的修复周期；不自动重置轮次。")
+        limit = min(limit, state["limit"])
+    if state["attempts"] >= limit:
+        raise HumanDecisionRequired(f"已达到 {limit} 轮修复上限，停止自动执行并交由用户决定；未宣称批准。")
+    if context["review_id"] in state["used_reviews"]:
+        raise ReviewError("同一次审查已用于修复，请复测并重新审查后再继续。")
+    state["limit"] = limit
+    state["attempts"] += 1
+    state["used_reviews"].append(context["review_id"])
+    # Consume before dispatch: failed or interrupted attempts still count.
+    atomic_json_write(state_file, state)
+    prompt = (
+        f"读取规则 {target / 'AGENTS.md'}、任务 {task[0]} 和已核验报告 {saved[0]}。"
+        "核对报告与当前代码是否一致，仅处理 findings 中已核验的实质缺陷；"
+        "advisories 不要求修复。已修复或过期指控提交证据回应，不照单改代码。"
+        "遵循最小修改范围并执行验收命令，保留真实结果。不要调用 Codex、其他实施入口、"
+        "删除轮次记录或绕过修复上限，不提交代码；证据无法解决的争议停止并报告。"
+    )
+    print(f"[*] 修复执行 {state['attempts']}/{limit}；执行成功后仍需复测与独立审查。", file=sys.stderr)
+    return run_agy(task_file=str(task[0]), prompt=prompt, target_project=target)
 
 
 def build_parser():
@@ -734,6 +856,10 @@ def build_parser():
     p_agy.add_argument("--task", "-t", default="docs/task.md", help="Task specification file (default: docs/task.md)")
     p_agy.add_argument("--prompt", "-p", help="Custom prompt for agy")
 
+    p_fix = subparsers.add_parser("fix", parents=[parent_parser], help="Run one bounded repair attempt from a saved review")
+    p_fix.add_argument("--review", required=True, help="Raw report saved by review --out")
+    p_fix.add_argument("--task", "-t", default="docs/task.md", help="Acceptance criteria file")
+
     # Subcommand: review
     p_review = subparsers.add_parser(
         "review",
@@ -775,6 +901,16 @@ def main(argv=None):
         sys.exit(0 if success else 1)
     elif args.command == "exec-agy":
         success = run_agy(task_file=args.task, prompt=args.prompt, target_project=target_project)
+        sys.exit(0 if success else 1)
+    elif args.command == "fix":
+        try:
+            success = run_fix(args.review, task_file=args.task, target_project=target_project)
+        except HumanDecisionRequired as exc:
+            print(f"[!] {exc}", file=sys.stderr)
+            sys.exit(3)
+        except (ReviewError, OSError) as exc:
+            print(f"[!] {exc}", file=sys.stderr)
+            sys.exit(1)
         sys.exit(0 if success else 1)
     elif args.command == "review":
         try:

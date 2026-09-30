@@ -1,0 +1,105 @@
+test_argument_parsing_project_precedence (test_codex_loop.TestCodexLoopTargetProject.test_argument_parsing_project_precedence) ... ok
+test_get_current_info_with_target (test_codex_loop.TestCodexLoopTargetProject.test_get_current_info_with_target) ... ok
+test_init_target_project_append_to_existing_agents (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_append_to_existing_agents) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_c37zegu0
+  - [APPEND] 已写入: AGENTS.md
+  - [CREATE] 已写入: .codex-loop.toml
+[*] 目标工程初始化完成！
+ok
+test_init_target_project_dry_run (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_dry_run) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_8q4_rs97
+[*] Dry-run 模式：以下文件将被创建或修改：
+  - [CREATE] C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_8q4_rs97\AGENTS.md
+  - [CREATE] C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_8q4_rs97\.codex-loop.toml
+ok
+test_init_target_project_fresh (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_fresh) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_b89umsnj
+  - [CREATE] 已写入: AGENTS.md
+  - [CREATE] 已写入: .codex-loop.toml
+[*] 目标工程初始化完成！
+ok
+test_init_target_project_idempotent (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_idempotent) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_nvyp6oj2
+  - [CREATE] 已写入: AGENTS.md
+  - [CREATE] 已写入: .codex-loop.toml
+[*] 目标工程初始化完成！
+[*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_nvyp6oj2
+  - [已存在] AGENTS.md 已包含双智能体协同规范，跳过增补。
+  - [已存在] .codex-loop.toml 已存在，跳过创建。
+[*] 目标工程初始化完成！
+ok
+test_resolve_target_project_default_cwd (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_default_cwd) ... ok
+test_resolve_target_project_explicit_valid (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_explicit_valid) ... ok
+test_resolve_target_project_file_not_dir (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_file_not_dir) ... ok
+test_resolve_target_project_nonexistent (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_nonexistent) ... ok
+test_acceptance_and_advisory_fields_require_valid_types (test_review.TestReview.test_acceptance_and_advisory_fields_require_valid_types) ... ok
+test_advisories_do_not_block_accepted_work (test_review.TestReview.test_advisories_do_not_block_accepted_work) ... ok
+test_approved_report_cannot_reconfirm_changed_acceptance (test_review.TestReview.test_approved_report_cannot_reconfirm_changed_acceptance) ... ok
+test_base_review_pins_merge_base_without_conflicting_flags (test_review.TestReview.test_base_review_pins_merge_base_without_conflicting_flags) ... ok
+test_changed_acceptance_does_not_reset_existing_cycle (test_review.TestReview.test_changed_acceptance_does_not_reset_existing_cycle) ... ok
+test_cli_conflicting_arguments_rejected_before_launch (test_review.TestReview.test_cli_conflicting_arguments_rejected_before_launch) ... ok
+test_closed_claim_identity_survives_consecutive_followups (test_review.TestReview.test_closed_claim_identity_survives_consecutive_followups) ... ok
+test_closed_history_cannot_disappear_or_reopen_without_new_evidence (test_review.TestReview.test_closed_history_cannot_disappear_or_reopen_without_new_evidence) ... ok
+test_confirmed_finding_after_rebuttal_requires_fix (test_review.TestReview.test_confirmed_finding_after_rebuttal_requires_fix) ... ok
+test_conflicting_scope_and_prompt_rejected_before_launch (test_review.TestReview.test_conflicting_scope_and_prompt_rejected_before_launch) ... ok
+test_contradictory_or_unsubstantiated_adjudications_are_invalid (test_review.TestReview.test_contradictory_or_unsubstantiated_adjudications_are_invalid) ... ok
+test_custom_instructions_use_prompt_without_target_flags (test_review.TestReview.test_custom_instructions_use_prompt_without_target_flags) ... ok
+test_default_review_uses_custom_uncommitted_scope_and_target_cwd (test_review.TestReview.test_default_review_uses_custom_uncommitted_scope_and_target_cwd) ... ok
+test_default_task_is_read_from_target_project (test_review.TestReview.test_default_task_is_read_from_target_project) ... ok
+test_duplicate_finding_ids_and_inconsistent_counts_fail_closed (test_review.TestReview.test_duplicate_finding_ids_and_inconsistent_counts_fail_closed) ... ok
+test_empty_scope_is_rejected_before_launch (test_review.TestReview.test_empty_scope_is_rejected_before_launch) ... ok
+test_equivalent_claim_locations_cannot_bypass_id_retention (test_review.TestReview.test_equivalent_claim_locations_cannot_bypass_id_retention) ... ok
+test_executable_missing_is_execution_failure (test_review.TestReview.test_executable_missing_is_execution_failure) ... ok
+test_explanations_with_code_and_labels_do_not_change_verdict (test_review.TestReview.test_explanations_with_code_and_labels_do_not_change_verdict) ... ok
+test_explicit_approval_with_crlf_and_trailing_blank_lines (test_review.TestReview.test_explicit_approval_with_crlf_and_trailing_blank_lines) ... ok
+test_explicit_task_path_is_relative_to_target (test_review.TestReview.test_explicit_task_path_is_relative_to_target) ... ok
+test_extra_rendered_findings_or_verdicts_after_zero_findings_fail_closed (test_review.TestReview.test_extra_rendered_findings_or_verdicts_after_zero_findings_fail_closed) ... ok
+test_failed_attempt_counts_and_same_review_cannot_be_reused (test_review.TestReview.test_failed_attempt_counts_and_same_review_cannot_be_reused) ... ok
+test_findings_require_complete_verified_evidence (test_review.TestReview.test_findings_require_complete_verified_evidence) ... ok
+test_fix_budget_persists_and_stops_at_two_attempts (test_review.TestReview.test_fix_budget_persists_and_stops_at_two_attempts) ... ok
+test_followup_allows_new_regression_but_retains_old_issue_id (test_review.TestReview.test_followup_allows_new_regression_but_retains_old_issue_id) ... ok
+test_followup_requires_decisions_for_every_prior_finding (test_review.TestReview.test_followup_requires_decisions_for_every_prior_finding) ... ok
+test_implicit_task_created_during_review_invalidates_approval (test_review.TestReview.test_implicit_task_created_during_review_invalidates_approval) ... ok
+test_invalid_base_fails_before_review_launch (test_review.TestReview.test_invalid_base_fails_before_review_launch) ... ok
+test_invalid_budget_config_or_counter_never_resets (test_review.TestReview.test_invalid_budget_config_or_counter_never_resets) ... ok
+test_invalid_or_incomplete_native_reports_fail_closed (test_review.TestReview.test_invalid_or_incomplete_native_reports_fail_closed) ... ok
+test_large_task_does_not_expand_windows_command_line (test_review.TestReview.test_large_task_does_not_expand_windows_command_line) ... ok
+test_legacy_reports_are_readable_history_but_cannot_be_live_approvals (test_review.TestReview.test_legacy_reports_are_readable_history_but_cannot_be_live_approvals) ... ok
+test_malformed_unknown_and_duplicate_responses_stop_before_launch (test_review.TestReview.test_malformed_unknown_and_duplicate_responses_stop_before_launch) ... ok
+test_missing_empty_and_invalid_utf8_tasks_fail_before_launch (test_review.TestReview.test_missing_empty_and_invalid_utf8_tasks_fail_before_launch) ... ok
+test_missing_modified_and_legacy_closed_identity_history_is_pending (test_review.TestReview.test_missing_modified_and_legacy_closed_identity_history_is_pending) ... ok
+test_missing_raw_report_never_uses_rendered_approval (test_review.TestReview.test_missing_raw_report_never_uses_rendered_approval) ... ok
+test_modified_report_or_task_context_stops_before_execution (test_review.TestReview.test_modified_report_or_task_context_stops_before_execution) ... ok
+test_native_comments_must_correspond_to_evidence_records (test_review.TestReview.test_native_comments_must_correspond_to_evidence_records) ... ok
+test_native_rendered_findings_never_approve (test_review.TestReview.test_native_rendered_findings_never_approve) ... ok
+test_native_single_line_ranges_match_equivalent_evidence_location (test_review.TestReview.test_native_single_line_ranges_match_equivalent_evidence_location) ... ok
+test_native_structured_approval_and_raw_output (test_review.TestReview.test_native_structured_approval_and_raw_output) ... ok
+test_native_structured_incorrect_patch_requires_fix (test_review.TestReview.test_native_structured_incorrect_patch_requires_fix) ... ok
+test_negative_quoted_unknown_and_incomplete_outputs_never_approve (test_review.TestReview.test_negative_quoted_unknown_and_incomplete_outputs_never_approve) ... ok
+test_new_verified_evidence_can_reopen_closed_problem (test_review.TestReview.test_new_verified_evidence_can_reopen_closed_problem) ... ok
+test_nonzero_process_with_approval_is_execution_failure (test_review.TestReview.test_nonzero_process_with_approval_is_execution_failure) ... ok
+test_partial_response_cannot_drop_another_unresolved_dispute (test_review.TestReview.test_partial_response_cannot_drop_another_unresolved_dispute) ... ok
+test_pending_and_approved_reports_do_not_launch_repairs (test_review.TestReview.test_pending_and_approved_reports_do_not_launch_repairs) ... ok
+test_prior_unresolved_dispute_cannot_disappear_without_response (test_review.TestReview.test_prior_unresolved_dispute_cannot_disappear_without_response) ... ok
+test_raising_configuration_cannot_expand_existing_budget (test_review.TestReview.test_raising_configuration_cannot_expand_existing_budget) ... ok
+test_raw_report_invalid_utf8_is_execution_failure (test_review.TestReview.test_raw_report_invalid_utf8_is_execution_failure) ... ok
+test_raw_result_preserved (test_review.TestReview.test_raw_result_preserved) ... ok
+test_rendered_review_envelope_is_accepted (test_review.TestReview.test_rendered_review_envelope_is_accepted) ... ok
+test_reopened_decision_requires_a_prior_closed_problem (test_review.TestReview.test_reopened_decision_requires_a_prior_closed_problem) ... ok
+test_response_changed_during_review_invalidates_adjudication (test_review.TestReview.test_response_changed_during_review_invalidates_adjudication) ... ok
+test_response_requires_previous_review_and_output_cannot_overwrite_inputs (test_review.TestReview.test_response_requires_previous_review_and_output_cannot_overwrite_inputs) ... ok
+test_result_file_is_cleaned_after_process_failure (test_review.TestReview.test_result_file_is_cleaned_after_process_failure) ... ok
+test_shifted_current_claim_cannot_be_reassigned (test_review.TestReview.test_shifted_current_claim_cannot_be_reassigned) ... ok
+test_shifted_identity_is_preserved_after_closure (test_review.TestReview.test_shifted_identity_is_preserved_after_closure) ... ok
+test_sidecar_output_cannot_overwrite_acceptance_or_previous_report (test_review.TestReview.test_sidecar_output_cannot_overwrite_acceptance_or_previous_report) ... ok
+test_task_changed_during_review_invalidates_approval (test_review.TestReview.test_task_changed_during_review_invalidates_approval) ... ok
+test_unanswered_response_and_unexpected_decision_fail_closed (test_review.TestReview.test_unanswered_response_and_unexpected_decision_fail_closed) ... ok
+test_uncertainty_report_is_saved_and_never_dispatched_for_repair (test_review.TestReview.test_uncertainty_report_is_saved_and_never_dispatched_for_repair) ... ok
+test_unknown_output_is_invalid_result (test_review.TestReview.test_unknown_output_is_invalid_result) ... ok
+test_unmet_acceptance_or_uncertainty_never_approves_or_assigns_blind_repairs (test_review.TestReview.test_unmet_acceptance_or_uncertainty_never_approves_or_assigns_blind_repairs) ... ok
+test_unresolved_dispute_stays_pending_and_is_saved (test_review.TestReview.test_unresolved_dispute_stays_pending_and_is_saved) ... ok
+test_unsubstantiated_incorrect_verdict_remains_pending (test_review.TestReview.test_unsubstantiated_incorrect_verdict_remains_pending) ... ok
+test_valid_approval_exits_zero (test_review.TestReview.test_valid_approval_exits_zero) ... ok
+test_valid_rejection_exits_two (test_review.TestReview.test_valid_rejection_exits_two) ... ok
+test_verified_rebuttal_can_close_finding_and_save_raw_report (test_review.TestReview.test_verified_rebuttal_can_close_finding_and_save_raw_report) ... ok
+
+----------------------------------------------------------------------
+Ran 80 tests in 0.740s
+
+OK

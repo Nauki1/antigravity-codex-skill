@@ -1,0 +1,19 @@
+{
+  "stage": 5,
+  "base_head": "8aa885deb4b156a3ec70a09dad853328f1ee32ec",
+  "files": {
+    "AGENTS.md": "eeaff96f8448888bb1f9a53b383243712b8573a720a59428a56a8d78b9376713",
+    "README.md": "17f9202b5fff83b3e03a8f314abce016f6cc1d5517abcbea298a0cb16bbbb812",
+    "SKILL.md": "4326bc6a0a57e0a59700af3f6aab6f460368f89c2689cf36c51689b76ed25be3",
+    "docs/review-policy.md": "8ad43275b47e3aedb41f82ef87ebcba865049897df758123982b35ef9f92d1d9",
+    "scripts/codex_loop.py": "7668cdb15e2f79671481bfbdc952b78b1529119c8ad1fffbe833562f5b284a8e",
+    "tests/test_review.py": "8909f30ad8e4968a1d2dbd9d941d23f51596dc56011370cf45cbc7474674a844"
+  },
+  "test_count": 80,
+  "test_exit_code": 0,
+  "test_command": "python -B -m unittest discover -s tests -p \"test_*.py\" -v",
+  "scope": "Approve completed acceptance with zero confirmed blockers while retaining advisory notes; enforce a persistent, bounded remediation budget and stop for human decision at the limit, never auto-approve exhaustion or incomplete review.",
+  "review_exit_code": 0,
+  "review_model_requested": "gpt-6.1-sol",
+  "review_result_sha256": "9de7747cdc3bdecf836f70c89da600b22ebcf26befaeacacef9ccc748e8f6e0d"
+}

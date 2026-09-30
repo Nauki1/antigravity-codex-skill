@@ -82,7 +82,7 @@ python scripts/codex_loop.py review
 
 默认审查 staged、unstaged 和 untracked 变更；`--base` 审查指定分支与 HEAD 的 merge base 之后的已跟踪差异；`--instructions` 增加未提交变更的审查重点。`--base` 与 `--instructions` 不能同时使用。包装器统一使用原生自定义审查 PROMPT，附加结果协议，不混用原生 CLI 的 `--uncommitted` / `--base` 与 PROMPT。[OpenAI 参数文档](https://learn.chatgpt.com/docs/developer-commands)
 
-原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出审查协议 JSON（协议版本、审查完成状态、发现数量、整体正确性及理由）。CLI 会渲染此解释，并在其后附加发现详情。包装器仅在审查完整、发现数量为零、整体结论为 `patch is correct` 且没有额外内容时批准；字段缺失、重复、类型错误或不完整都不放行。
+原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出当前 `codex-loop-review-v3` 协议 JSON。CLI 渲染解释并附加发现详情。审查完成、验收达标、整体正确、没有已核验实质缺陷或待决疑点/争议时批准；可选建议放入 `advisories`，可以带建议收工。未核验实质疑点放入 `uncertainties`，不直接派发返工。字段缺失、重复、类型错误或不完整均不放行；v2 只用于历史输入。
 
 底层使用 `codex exec review --ephemeral --output-last-message <临时文件>` 取得渲染后的最终报告，而不是假设它导出原生 JSON。包装器保留完整报告，再输出对应的末行结论。进程失败、基线解析失败或临时结果缺失时返回 `1`；结果文件在读取后自动清理，不写入目标工程。
 
@@ -94,6 +94,8 @@ python scripts/codex_loop.py review
 Antigravity 针对已核验问题修复并复测，也可以提供证据反驳。首次审查用 `--out reviews/first.txt` 保存原始报告；复审用 `--previous-review reviews/first.txt --response reviews/response.json --out reviews/second.txt`。回应引用稳定问题 ID，并包含 `position`（`fixed` / `disputed`）、理由和证据，格式见 [审查与收工规则](docs/review-policy.md)。审查方独立裁定；证据未能解决的争议保持待决，不能自动批准或继续派发返工。
 
 后续复审使用最近一次报告，聚焦旧问题、修复及相关回归，保留所有问题 ID 和关闭记录。已关闭的问题须有经核验的新证据才可明确重开，不能省略历史或把同一指控换个 ID 再派发。
+
+自动修复使用 `python scripts/codex_loop.py fix --review reviews/first.txt --task docs/task.md`。`review --out` 会同时保存原报告和上下文记录；计数保存在目标工程 `.codex/codex-loop/`，默认最多2轮，失败也计入，同一审查不能重复派发。到上限或存在待决问题时 `fix` 返回 `3`，交由用户决定，不自动清空计数或宣称批准。新周期的配置及授权要求见 [审查与收工规则](docs/review-policy.md)。实施执行返回 `0` 后仍须复测和独立审查。
 
 #### Step 5: 会话归档沉淀 (Sync Session)
 将本次开发的重要讨论与结论一键归档到项目中：

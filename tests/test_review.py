@@ -113,9 +113,10 @@ class TestReview(unittest.TestCase):
 
     def test_rendered_review_envelope_is_accepted(self):
         self.response(json.dumps({
-            "protocol": "codex-loop-review-v2", "review_complete": True, "findings": [],
+            "protocol": "codex-loop-review-v3", "review_complete": True, "findings": [],
             "findings_count": 0, "overall_correctness": "patch is correct",
             "reason": "No actionable regressions found after reviewing the changes.",
+            "acceptance_met": True, "advisories": [], "uncertainties": [],
         }))
         self.assertEqual(self.invoke(), 0)
 
@@ -183,12 +184,13 @@ class TestReview(unittest.TestCase):
 
     def native_report(self, **changes):
         report = {
-            "protocol": "codex-loop-review-v2",
+            "protocol": "codex-loop-review-v3",
             "review_complete": True,
             "findings_count": 0,
             "findings": [],
             "overall_correctness": "patch is correct",
             "reason": "The change fixes the review gate without actionable regressions.",
+            "acceptance_met": True, "advisories": [], "uncertainties": [],
         }
         report.update(changes)
         if "adjudications" in changes and "history" not in changes:
@@ -548,6 +550,139 @@ class TestReview(unittest.TestCase):
         self.runner.side_effect = None
         self.runner.return_value = subprocess.CompletedProcess([], 0, "APPROVED", "")
         self.assertEqual(self.invoke(), 1)
+
+    def test_advisories_do_not_block_accepted_work(self):
+        self.response(self.native_report(advisories=["Optional naming improvement."]))
+        self.assertEqual(self.invoke(), 0)
+
+    def test_unmet_acceptance_or_uncertainty_never_approves_or_assigns_blind_repairs(self):
+        for report in (self.native_report(acceptance_met=False), self.native_report(uncertainties=["Need a runtime trace to establish this potential defect."])):
+            self.response(report)
+            self.assertEqual(self.invoke(), 1)
+
+    def test_legacy_reports_are_readable_history_but_cannot_be_live_approvals(self):
+        legacy = json.loads(self.native_report())
+        legacy["protocol"] = "codex-loop-review-v2"
+        for key in ("acceptance_met", "advisories", "uncertainties"):
+            del legacy[key]
+        self.assertEqual(codex_loop.parse_review_report(json.dumps(legacy))["protocol"], "codex-loop-review-v2")
+        self.response(json.dumps(legacy))
+        self.assertEqual(self.invoke(), 1)
+        previous = Path(self.target) / "legacy.txt"
+        previous.write_text(json.dumps(legacy), encoding="utf-8")
+        self.response(self.native_report())
+        self.assertEqual(self.invoke("--previous-review", previous.name), 0)
+
+    def test_acceptance_and_advisory_fields_require_valid_types(self):
+        for changes in ({"acceptance_met": "true"}, {"advisories": [""]}, {"advisories": "none"}, {"uncertainties": [False]}):
+            self.response(self.native_report(**changes))
+            self.assertEqual(self.invoke(), 1)
+
+    def invoke_fix(self, report, *args):
+        with self.assertRaises(SystemExit) as caught:
+            codex_loop.main(["fix", "--project", self.target, "--review", str(report), *args])
+        return caught.exception.code
+
+    def save_fix_review(self, **changes):
+        task = Path(self.target) / "docs/task.md"
+        task.parent.mkdir(exist_ok=True)
+        if not task.exists():
+            task.write_text("Acceptance: average([1, 2]) returns 1.5.", encoding="utf-8")
+        report = Path(self.target) / "review.txt"
+        data = {"findings": [self.finding()], "overall_correctness": "patch is incorrect"}
+        data.update(changes)
+        self.response(self.native_report(**data))
+        self.invoke("--out", str(report))
+        return report
+
+    def test_fix_budget_persists_and_stops_at_two_attempts(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        for _ in range(2):
+            self.assertEqual(self.invoke_fix(self.save_fix_review()), 0)
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 3)
+        self.assertEqual(agy.call_count, 2)
+        state = json.loads(next((Path(self.target) / ".codex/codex-loop").glob("fix-*.json")).read_text(encoding="utf-8"))
+        self.assertEqual(state["attempts"], 2)
+        self.assertEqual(len(set(state["used_reviews"])), 2)
+        self.assertIn("advisories", agy.call_args.kwargs["prompt"])
+
+    def test_failed_attempt_counts_and_same_review_cannot_be_reused(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=False))
+        report = self.save_fix_review()
+        self.assertEqual(self.invoke_fix(report), 1)
+        self.assertEqual(self.invoke_fix(report), 1)
+        self.assertEqual(agy.call_count, 1)
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 1)
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 3)
+        self.assertEqual(agy.call_count, 2)
+
+    def test_raising_configuration_cannot_expand_existing_budget(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        config = Path(self.target) / ".codex-loop.toml"
+        config.write_text("[collaboration]\nmax_fix_rounds = 1\n", encoding="utf-8")
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 0)
+        config.write_text("[collaboration]\nmax_fix_rounds = 9\n", encoding="utf-8")
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 3)
+        self.assertEqual(agy.call_count, 1)
+
+    def test_pending_and_approved_reports_do_not_launch_repairs(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        approved = self.save_fix_review(findings=[], overall_correctness="patch is correct", advisories=["Optional optimization"])
+        self.assertEqual(self.invoke_fix(approved), 0)
+        pending = self.save_fix_review(uncertainties=["Material fact not established"])
+        self.assertEqual(self.invoke_fix(pending), 3)
+        agy.assert_not_called()
+        self.assertFalse((Path(self.target) / ".codex/codex-loop").exists())
+
+    def test_modified_report_or_task_context_stops_before_execution(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        report = self.save_fix_review()
+        report.write_text(self.native_report(findings=[self.finding(impact="Changed report")], overall_correctness="patch is incorrect"), encoding="utf-8")
+        self.assertEqual(self.invoke_fix(report), 1)
+        report = self.save_fix_review()
+        (Path(self.target) / "docs/task.md").write_text("Changed acceptance.", encoding="utf-8")
+        self.assertEqual(self.invoke_fix(report), 1)
+        agy.assert_not_called()
+
+    def test_changed_acceptance_does_not_reset_existing_cycle(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 0)
+        (Path(self.target) / "docs/task.md").write_text("Changed acceptance.", encoding="utf-8")
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 3)
+        self.assertEqual(agy.call_count, 1)
+
+    def test_invalid_budget_config_or_counter_never_resets(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        report = self.save_fix_review()
+        config = Path(self.target) / ".codex-loop.toml"
+        for value in ("true", "0", '"2"', "[broken"):
+            config.write_text(f"[collaboration]\nmax_fix_rounds = {value}\n", encoding="utf-8")
+            self.assertEqual(self.invoke_fix(report), 1)
+        config.unlink()
+        self.assertEqual(self.invoke_fix(report), 0)
+        state = next((Path(self.target) / ".codex/codex-loop").glob("fix-*.json"))
+        state.write_text("{}", encoding="utf-8")
+        self.assertEqual(self.invoke_fix(self.save_fix_review()), 1)
+        self.assertEqual(agy.call_count, 1)
+
+    def test_sidecar_output_cannot_overwrite_acceptance_or_previous_report(self):
+        task = Path(self.target) / "review.txt.context.json"
+        task.write_text("Acceptance document.", encoding="utf-8")
+        self.assertEqual(self.invoke("--task", str(task), "--out", "review.txt"), 1)
+        self.runner.assert_not_called()
+
+    def test_approved_report_cannot_reconfirm_changed_acceptance(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        approved = self.save_fix_review(findings=[], overall_correctness="patch is correct")
+        (Path(self.target) / "docs/task.md").write_text("New acceptance.", encoding="utf-8")
+        self.assertEqual(self.invoke_fix(approved), 1)
+        agy.assert_not_called()
+
+    def test_uncertainty_report_is_saved_and_never_dispatched_for_repair(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        pending = self.save_fix_review(findings=[], overall_correctness="patch is incorrect", uncertainties=["Missing runtime evidence"])
+        self.assertEqual(self.invoke_fix(pending), 3)
+        agy.assert_not_called()
 
     def test_raw_report_invalid_utf8_is_execution_failure(self):
         def run(args, **kwargs):
