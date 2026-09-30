@@ -35,10 +35,34 @@
 
 ---
 
-## 4. 上下文持久化机制 (Context Persistence)
+---
 
-- 对话不再转瞬即逝：通过 `scripts/sync_session.py`，每次关键迭代的对话记录和决策要点都会被持久化为 Markdown 并受 Git 版本控制。
-- Codex 在执行时，可读取 `.agents/sessions/` 下的历史纪要，保持上下文平滑延续。
+## 4. 双向互调极简闭环 (Bidirectional Loops)
+
+两端操作同一个物理 Git 工作区，修改直接落盘；通过终端 CLI 命令实现相互调度：
+
+### 模式 A：正向流（Antigravity 发起）
+**用户交互 → Codex 计划 → Antigravity 落地与测试 → Codex 审查**
+1. **规划**：`python scripts/codex_loop.py plan "用户需求" -o docs/task.md`
+2. **实施**：Antigravity 读取 `docs/task.md`，编写代码并运行本地单元测试。
+3. **审查**：`python scripts/codex_loop.py review`（Codex 对 `git diff` 进行异构代码审查，直至通过）。
+
+### 模式 B：反向流（Codex 发起）
+**Codex 终端规划 → 调用 Antigravity CLI 无头实现 → Codex 审查验收**
+1. **规划**：在 Codex 终端/IDE 中完成规划并写入 `docs/task.md`。
+2. **执行**：一行命令唤醒 Antigravity CLI 无头落地并执行测试：
+   ```powershell
+   python scripts/codex_loop.py exec-agy --task docs/task.md
+   # 底层执行: agy -p "阅读 AGENTS.md 与 docs/task.md，按计划实现并运行测试" --mode=accept-edits
+   ```
+3. **审查**：`python scripts/codex_loop.py review`（Codex 核验真实 diff 与测试日志）。
+
+---
+
+## 5. 上下文持久化机制 (Context Persistence)
+
+- 关键决策沉淀：通过 `python scripts/sync_session.py -t <主题>`，随时将 Antigravity 的思考与方案导出为 Markdown 进入版本库。
+- 任务上下文交接：当前任务的步骤与验收命令统一维护在 `docs/task.md`，避免两端记忆断层。
 
 ---
 

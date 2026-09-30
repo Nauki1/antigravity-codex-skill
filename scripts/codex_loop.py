@@ -176,6 +176,16 @@ def run_review(instructions=None, model=None, base=None):
     return is_approved, output
 
 
+def run_agy(task_file="docs/task.md", prompt=None):
+    """Invoke Antigravity CLI in headless mode to implement changes according to task plan."""
+    agy_bin = shutil.which("agy") or str(Path.home() / "AppData" / "Local" / "agy" / "bin" / "agy.exe")
+    instruction = prompt or f"阅读 AGENTS.md 与 {task_file}，按计划实现代码，仅修改相关文件，并执行规定的验收测试命令；不要再次调用 Codex，不提交代码。"
+    cmd = [agy_bin, "-p", instruction, "--mode=accept-edits"]
+    print(f"[*] 启动 Antigravity CLI (agy) 无头实施中 (Task: {task_file})...", file=sys.stderr)
+    res = subprocess.run(cmd, stdin=subprocess.DEVNULL)
+    return res.returncode == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Codex Automation Loop Runner")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -188,7 +198,12 @@ def main():
     p_plan.add_argument("prompt", help="Task requirement description")
     p_plan.add_argument("--model", "-m", help="Specific model (default: config or gpt-6.1-sol)")
     p_plan.add_argument("--reasoning", "-r", default="xhigh", help="Reasoning effort (low/medium/high/xhigh)")
-    p_plan.add_argument("--out", "-o", help="Target output file (e.g. docs/architecture.md)")
+    p_plan.add_argument("--out", "-o", help="Target output file (e.g. docs/task.md)")
+
+    # Subcommand: exec-agy
+    p_agy = subparsers.add_parser("exec-agy", help="Run Antigravity CLI (agy) to implement task")
+    p_agy.add_argument("--task", "-t", default="docs/task.md", help="Task specification file (default: docs/task.md)")
+    p_agy.add_argument("--prompt", "-p", help="Custom prompt for agy")
 
     # Subcommand: review
     p_review = subparsers.add_parser("review", help="Review current uncommitted diff")
@@ -202,6 +217,9 @@ def main():
         print(json.dumps(get_current_info(), indent=2, ensure_ascii=False))
     elif args.command == "plan":
         success, _ = run_plan(args.prompt, model=args.model, reasoning_effort=args.reasoning, target_file=args.out)
+        sys.exit(0 if success else 1)
+    elif args.command == "exec-agy":
+        success = run_agy(task_file=args.task, prompt=args.prompt)
         sys.exit(0 if success else 1)
     elif args.command == "review":
         approved, _ = run_review(instructions=args.instructions, model=args.model, base=args.base)
