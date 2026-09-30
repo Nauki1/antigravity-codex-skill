@@ -93,6 +93,8 @@ python scripts/codex_loop.py review
 #### Step 4: 修复闭环 (Antigravity Fix)
 Antigravity 针对已核验问题修复并复测，也可以提供证据反驳。首次审查用 `--out reviews/first.txt` 保存原始报告；复审用 `--previous-review reviews/first.txt --response reviews/response.json --out reviews/second.txt`。回应引用稳定问题 ID，并包含 `position`（`fixed` / `disputed`）、理由和证据，格式见 [审查与收工规则](docs/review-policy.md)。审查方独立裁定；证据未能解决的争议保持待决，不能自动批准或继续派发返工。
 
+后续复审使用最近一次报告，聚焦旧问题、修复及相关回归，保留所有问题 ID 和关闭记录。已关闭的问题须有经核验的新证据才可明确重开，不能省略历史或把同一指控换个 ID 再派发。
+
 #### Step 5: 会话归档沉淀 (Sync Session)
 将本次开发的重要讨论与结论一键归档到项目中：
 ```bash

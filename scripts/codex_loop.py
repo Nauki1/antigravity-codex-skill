@@ -189,6 +189,7 @@ AGENTS_TEMPLATE = """# Dual-Agent Workspace Constitution (Antigravity & Codex)
 3. **关键任务异构审查 (Heterogeneous Red Teaming)**：
    - 必须修复的问题须给出稳定 ID、位置、支持范围内的触发条件、预期与实际行为、影响，以及复现或确定的可达代码证据。未经核验的猜测保持待验证，不直接派给实施方修改。
    - 实施方可针对问题 ID 提交修复或反驳证据；审查方须独立核验并逐项裁定。证据无法解决争议时交由用户决定，不自动批准或继续返工。
+   - 复审聚焦上轮问题、修复及相关回归，延续全部旧 ID 和关闭记录；已关闭问题只有经核验的新证据才可明确重开，不能换 ID 重复派发。
    - 涉及核心算法、架构改造、底层鉴权或跨模块调用的变更，必须调用 `codex review` 获得 `APPROVED` 判定。
    - 审查报告先给出发现和理由，最后一行只写 `APPROVED`（无待修复问题）或 `NEEDS_FIX`（存在待修复问题）。
    - 结论只出现一次，不放入引用、代码块或示例；未完成审查时不得输出批准。
@@ -327,15 +328,20 @@ REVIEW_PROTOCOL = (
     "potential material defect cannot be established, report an incomplete review "
     "with the remaining uncertainty rather than assigning unverified repair work. "
     "Also include adjudications (an array, empty without implementer responses or "
-    "prior unresolved disputes). Carry forward every prior needs_human ID and "
-    "adjudicate it explicitly; never silently drop an unresolved dispute. "
+    "prior review). Carry forward every prior finding and adjudication ID and "
+    "adjudicate it explicitly, including closed and unresolved IDs. "
     "For each supplied response, independently check its evidence against code "
     "and tests. Return exactly one decision with finding_id, decision "
-    "(closed, confirmed, or needs_human), reason, and evidence, all nonempty "
+    "(closed, confirmed, reopened, or needs_human), reason, and evidence, all nonempty "
     "strings. Closed IDs must not remain findings; confirmed IDs must remain. "
     "Do not accept a rebuttal merely because the implementer asserts it. "
     "If evidence cannot resolve the dispute, use needs_human; do not assign more "
-    "repairs or claim approval. Retain supplied finding IDs. "
+    "repairs or claim approval. Retain supplied finding IDs. Reopened IDs must "
+    "have been closed in the prior review, must remain current findings, and "
+    "must include an additional nonempty new_evidence field establishing a "
+    "new fact since closure; repeating the closure evidence is insufficient. "
+    "Include a history array copied exactly from the supplied claim identities; "
+    "retain it after closure so a claim cannot return under a different ID. "
     "Do not wrap this object in Markdown or add text outside it. If review could "
     "not be completed, set review_complete to false. The wrapper preserves this "
     "report and emits APPROVED only for a complete, correct review with zero findings; "
@@ -350,6 +356,33 @@ REVIEW_CRITERIA = (
     "did not list each existing guarantee. Do not silently expand or redefine "
     "the agreed acceptance criteria."
 )
+
+REVIEW_FOLLOWUP = (
+    "This is a focused follow-up review: adjudicate every previous finding and "
+    "decision, check the repairs and relevant regressions they introduce. "
+    "Keep closed issues closed unless new concrete evidence establishes a "
+    "defect; do not relabel a closed or existing claim under a new ID. "
+    "New material defects within the agreed scope may be reported with evidence. "
+    "Do not restart a general preference or unrelated improvement review."
+)
+
+
+def review_history(prior):
+    """Keep the original claim identity even after its finding is closed."""
+    records = {}
+    for item in (prior or {}).get("history", []) + (prior or {}).get("findings", []):
+        identity = {key: item[key] for key in ("id", "title", "location", "trigger")}
+        records[tuple(identity.values())] = identity
+    return [records[key] for key in sorted(records)]
+
+
+def normalize_review_location(row):
+    row = row.replace("\\", "/")
+    prefix, colon, span = row.rpartition(":")
+    start, dash, finish = span.partition("-")
+    if colon and start.isascii() and start.isdigit() and (not dash or (finish.isascii() and finish.isdigit() and int(start) == int(finish))):
+        return f"{prefix}:{int(start)}"
+    return row
 
 
 class ReviewError(RuntimeError):
@@ -377,7 +410,7 @@ def parse_review_report(output):
         raise ReviewError("审查协议 JSON 不完整或包含重复字段，未取得批准。", output) from exc
     required = {"protocol", "review_complete", "findings_count", "overall_correctness", "reason", "findings"}
     if (
-        not isinstance(report, dict) or not required <= set(report) or set(report) - required - {"adjudications"}
+        not isinstance(report, dict) or not required <= set(report) or set(report) - required - {"adjudications", "history"}
         or report["protocol"] != "codex-loop-review-v2"
         or report["review_complete"] is not True
         or type(report["findings_count"]) is not int or report["findings_count"] < 0
@@ -403,16 +436,31 @@ def parse_review_report(output):
         raise ReviewError("争议裁定格式无效，保持待审查。", output)
     decided = set()
     for decision in decisions:
+        decision_fields = {"finding_id", "decision", "reason", "evidence"}
+        if isinstance(decision, dict) and decision.get("decision") == "reopened":
+            decision_fields.add("new_evidence")
         if (
-            not isinstance(decision, dict) or set(decision) != {"finding_id", "decision", "reason", "evidence"}
+            not isinstance(decision, dict) or set(decision) != decision_fields
             or any(not isinstance(value, str) or not value.strip() for value in decision.values())
-            or decision["decision"] not in ("closed", "confirmed", "needs_human")
+            or decision["decision"] not in ("closed", "confirmed", "reopened", "needs_human")
             or decision["finding_id"] in decided
             or (decision["decision"] == "closed" and decision["finding_id"] in ids)
-            or (decision["decision"] == "confirmed" and decision["finding_id"] not in ids)
+            or (decision["decision"] in ("confirmed", "reopened") and decision["finding_id"] not in ids)
         ):
             raise ReviewError("争议裁定缺少证据、重复或与当前发现矛盾，保持待审查。", output)
         decided.add(decision["finding_id"])
+    history = report.get("history", [])
+    if not isinstance(history, list):
+        raise ReviewError("问题历史格式无效，保持待审查。", output)
+    history_records = set()
+    for item in history:
+        if (
+            not isinstance(item, dict) or set(item) != {"id", "title", "location", "trigger"}
+            or any(not isinstance(value, str) or not value.strip() for value in item.values())
+            or tuple(item[key] for key in ("id", "title", "location", "trigger")) in history_records or item["id"] not in ids | decided
+        ):
+            raise ReviewError("问题历史缺少身份信息、重复或没有对应裁定，保持待审查。", output)
+        history_records.add(tuple(item[key] for key in ("id", "title", "location", "trigger")))
     # The renderer appends native findings after overall_explanation. Such text
     # must never be ignored when a zero-findings approval is claimed.
     trailer = output.lstrip()[end:].strip()
@@ -423,19 +471,12 @@ def parse_review_report(output):
         if not lines or lines[0] not in ("Review comment:", "Full review comments:"):
             raise ReviewError("缺少对应的原生问题列表，保持待审查。", output)
         rows = []
-        def normalize_row(row):
-            row = row.replace("\\", "/")
-            prefix, colon, span = row.rpartition(":")
-            start, dash, finish = span.partition("-")
-            if colon and start.isascii() and start.isdigit() and (not dash or (finish.isascii() and finish.isdigit() and int(start) == int(finish))):
-                return f"{prefix}:{int(start)}"
-            return row
         for line in lines[1:]:
             if line.startswith("- "):
-                rows.append(normalize_row(line))
+                rows.append(normalize_review_location(line))
             elif line.strip() and not line.startswith("  "):
                 raise ReviewError("原生问题列表含有未知或矛盾内容，保持待审查。", output)
-        expected_rows = [normalize_row(f"- {finding['title']} — {finding['location']}") for finding in report["findings"]]
+        expected_rows = [normalize_review_location(f"- {finding['title']} — {finding['location']}") for finding in report["findings"]]
         if sorted(rows) != sorted(expected_rows):
             raise ReviewError("原生问题与证据记录不对应，保持待审查。", output)
     if not report["findings"] and report["overall_correctness"] == "patch is incorrect" and not any(item["decision"] == "needs_human" for item in decisions):
@@ -475,6 +516,10 @@ def load_review_discussion(target, previous_review=None, response_file=None):
     previous = load_review_task(target, previous_review) if previous_review is not None else None
     response = load_review_task(target, response_file) if response_file is not None else None
     prior = parse_review_report(previous[2]) if previous else None
+    if prior:
+        identities = {item["id"] for item in review_history(prior)}
+        if any(item["finding_id"] not in identities for item in prior.get("adjudications", [])):
+            raise ReviewError("上轮关闭或争议记录缺少原问题身份，请从保留原问题的报告重新复审。")
     replies = []
     if response:
         try:
@@ -543,7 +588,9 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
         f"Agreed task snapshot ({task[0]}, SHA-256 {task[1]}):\n{task[2]}"
         if task else "No task document supplied. Use explicit user instructions and existing project guarantees; do not invent requirements."
     )
-    discussion = f"Previous validated review:\n{json.dumps(prior, ensure_ascii=False)}\nImplementer responses:\n{json.dumps(replies, ensure_ascii=False)}" if prior else "No previous review or implementer responses supplied."
+    history = review_history(prior)
+    discussion = f"{REVIEW_FOLLOWUP}\nPrevious validated review:\n{json.dumps(prior, ensure_ascii=False)}\nImplementer responses:\n{json.dumps(replies, ensure_ascii=False)}" if prior else "No previous review or implementer responses supplied."
+    discussion += f"\nReturn history exactly as these claim identities (unchanged even after closure):\n{json.dumps(history, ensure_ascii=False)}"
     prompt = f"{scope}\n{REVIEW_CRITERIA}\n{task_context}\n{discussion}\nAdditional review instructions:\n{instructions or ''}\n\n{REVIEW_PROTOCOL}"
     cmd.extend(["--", "-"])
 
@@ -588,10 +635,30 @@ def run_review(instructions=None, model=None, base=None, target_project=None, ta
                 raise ReviewError("审查期间上轮报告或实施方回应发生变化，需重新审查。", output)
     report = parse_review_report(output)
     reply_ids = {item["finding_id"] for item in replies}
-    reply_ids |= {item["finding_id"] for item in (prior or {}).get("adjudications", []) if item["decision"] == "needs_human"}
+    reply_ids |= {item["finding_id"] for item in (prior or {}).get("adjudications", [])}
+    reply_ids |= {item["id"] for item in (prior or {}).get("findings", [])}
     decision_ids = {item["finding_id"] for item in report.get("adjudications", [])}
     if decision_ids != reply_ids:
-        raise ReviewError("实施方回应未逐项裁定，或存在未经请求的裁定。", output)
+        raise ReviewError("上轮问题或实施方回应未逐项裁定，或存在未知裁定。", output)
+    if sorted(report.get("history", []), key=lambda item: tuple(item[key] for key in ("id", "title", "location", "trigger"))) != history:
+        raise ReviewError("原问题身份历史被遗漏或修改，保持待审查。", output)
+    old_decisions = {item["finding_id"]: item for item in (prior or {}).get("adjudications", [])}
+    for decision in report.get("adjudications", []):
+        old = old_decisions.get(decision["finding_id"])
+        was_closed = old is not None and old["decision"] == "closed"
+        if was_closed and decision["decision"] not in ("closed", "reopened"):
+            raise ReviewError("已关闭问题只能凭新证据明确重开，保持待审查。", output)
+        if decision["decision"] == "reopened" and (
+            not was_closed or " ".join(decision["new_evidence"].split()).casefold() == " ".join(old["evidence"].split()).casefold()
+        ):
+            raise ReviewError("重开问题缺少不同于关闭依据的新证据，保持待审查。", output)
+    for finding in report["findings"]:
+        if any(
+            finding["id"] != old["id"] and all(finding[key] == old[key] for key in ("title", "trigger"))
+            and normalize_review_location(finding["location"]) == normalize_review_location(old["location"])
+            for old in history + (prior or {}).get("findings", [])
+        ):
+            raise ReviewError("同一上轮问题被更换 ID，保持待审查。", output)
     if saved_path:
         saved_path.parent.mkdir(parents=True, exist_ok=True)
         saved_path.write_text(output, encoding="utf-8")

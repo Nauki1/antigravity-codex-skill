@@ -191,6 +191,8 @@ class TestReview(unittest.TestCase):
             "reason": "The change fixes the review gate without actionable regressions.",
         }
         report.update(changes)
+        if "adjudications" in changes and "history" not in changes:
+            report["history"] = [{key: self.finding(id=item["finding_id"])[key] for key in ("id", "title", "location", "trigger")} for item in changes["adjudications"]]
         if "findings" in changes and "findings_count" not in changes and isinstance(changes["findings"], list):
             report["findings_count"] = len(changes["findings"])
         output = json.dumps(report)
@@ -448,6 +450,90 @@ class TestReview(unittest.TestCase):
         self.response(self.native_report(adjudications=[self.decision(decision="needs_human")]))
         self.assertEqual(self.invoke("--previous-review", previous.name), 1)
         self.assertIn("需用户决定", self.stderr.getvalue())
+
+    def test_followup_requires_decisions_for_every_prior_finding(self):
+        previous, _ = self.discussion()
+        self.response(self.native_report())
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+        self.response(self.native_report(adjudications=[self.decision()]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 0)
+        self.assertIn(codex_loop.REVIEW_FOLLOWUP, self.runner.call_args.kwargs["input"])
+
+    def test_closed_history_cannot_disappear_or_reopen_without_new_evidence(self):
+        previous = Path(self.target) / "closed.txt"
+        previous.write_text(self.native_report(adjudications=[self.decision()]), encoding="utf-8")
+        for output in (
+            self.native_report(),
+            self.native_report(findings=[self.finding()], adjudications=[self.decision(decision="confirmed")]),
+            self.native_report(findings=[self.finding()], adjudications=[self.decision(decision="reopened")]),
+            self.native_report(findings=[self.finding()], adjudications=[self.decision(decision="reopened", new_evidence=self.decision()["evidence"].upper())]),
+        ):
+            self.response(output)
+            self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+        self.response(self.native_report(adjudications=[self.decision()]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 0)
+
+    def test_new_verified_evidence_can_reopen_closed_problem(self):
+        previous = Path(self.target) / "closed.txt"
+        previous.write_text(self.native_report(adjudications=[self.decision()]), encoding="utf-8")
+        self.response(self.native_report(findings=[self.finding()], adjudications=[self.decision(decision="reopened", new_evidence="A later change removed the previously tested guard.")]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 2)
+
+    def test_reopened_decision_requires_a_prior_closed_problem(self):
+        previous, _ = self.discussion()
+        self.response(self.native_report(findings=[self.finding()], adjudications=[self.decision(decision="reopened", new_evidence="new proof")]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+
+    def test_followup_allows_new_regression_but_retains_old_issue_id(self):
+        previous, _ = self.discussion()
+        new = self.finding(id="F2", title="New regression", location="other.py:3", trigger="Another supported input")
+        self.response(self.native_report(findings=[new], adjudications=[self.decision()]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 2)
+        self.response(self.native_report(findings=[self.finding(id="F2")], adjudications=[self.decision()]))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+
+    def test_closed_claim_identity_survives_consecutive_followups(self):
+        previous, _ = self.discussion()
+        closed = Path(self.target) / "closed.txt"
+        self.response(self.native_report(adjudications=[self.decision()]))
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--out", closed.name), 0)
+        self.response(self.native_report(findings=[self.finding(id="F2")], adjudications=[self.decision()]))
+        self.assertEqual(self.invoke("--previous-review", closed.name), 1)
+
+    def test_shifted_current_claim_cannot_be_reassigned(self):
+        previous, _ = self.discussion()
+        previous.write_text(self.native_report(findings=[self.finding(location="average.py:8")], adjudications=[self.decision(decision="confirmed")]), encoding="utf-8")
+        prior = codex_loop.parse_review_report(previous.read_text(encoding="utf-8"))
+        self.response(self.native_report(findings=[self.finding(id="F2", location="average.py:8")], adjudications=[self.decision()], history=codex_loop.review_history(prior)))
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+
+    def test_shifted_identity_is_preserved_after_closure(self):
+        previous, _ = self.discussion()
+        previous.write_text(self.native_report(findings=[self.finding(location="average.py:8")], adjudications=[self.decision(decision="confirmed")]), encoding="utf-8")
+        history = [{key: self.finding(location=location)[key] for key in ("id", "title", "location", "trigger")} for location in ("average.py:2", "average.py:8")]
+        closed = Path(self.target) / "closed.txt"
+        self.response(self.native_report(adjudications=[self.decision()], history=history))
+        self.assertEqual(self.invoke("--previous-review", previous.name, "--out", closed.name), 0)
+        self.response(self.native_report(findings=[self.finding(id="F2", location="average.py:8")], adjudications=[self.decision()], history=history))
+        self.assertEqual(self.invoke("--previous-review", closed.name), 1)
+
+    def test_equivalent_claim_locations_cannot_bypass_id_retention(self):
+        previous, _ = self.discussion()
+        for original, updated in (("average.py:2", "average.py:2-2"), ("D:\\app\\average.py:2", "D:/app/average.py:2-2")):
+            previous.write_text(self.native_report(findings=[self.finding(location=original)]), encoding="utf-8")
+            history = [{key: self.finding(location=original)[key] for key in ("id", "title", "location", "trigger")}]
+            self.response(self.native_report(findings=[self.finding(id="F2", location=updated)], adjudications=[self.decision()], history=history))
+            self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+
+    def test_missing_modified_and_legacy_closed_identity_history_is_pending(self):
+        previous, _ = self.discussion()
+        for history in ([], [{"id": "F1", "title": "changed", "location": "average.py:2", "trigger": "average([1, 2])"}]):
+            self.response(self.native_report(adjudications=[self.decision()], history=history))
+            self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+        previous.write_text(self.native_report(adjudications=[self.decision()], history=[]), encoding="utf-8")
+        self.runner.reset_mock()
+        self.assertEqual(self.invoke("--previous-review", previous.name), 1)
+        self.runner.assert_not_called()
 
     def test_partial_response_cannot_drop_another_unresolved_dispute(self):
         previous, response = self.discussion([{"finding_id": "F2", "position": "fixed", "reason": "Fixed", "evidence": "Passing test"}])

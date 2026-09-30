@@ -1,0 +1,19 @@
+{
+  "stage": 4,
+  "base_head": "81cd29b90e7d04a8005121c34a487f1fa7f9ce24",
+  "files": {
+    "AGENTS.md": "8aeed3158db0fbcf1631103345a3791e01b7a16383aecd00d66b1211a472d734",
+    "README.md": "00cb53bd7a18e4e4596dfb45d6f1e3ef24d098dee433c7841a22a3951dde589c",
+    "SKILL.md": "8e59ef7c243519dde4f9bd064e101ae4d9070b0cf0d31e373da77d04b02bffab",
+    "docs/review-policy.md": "c26783cd840678d4ae1e03ab481f8fbcc8f719e9d614550b1bb1f5c035d51aa6",
+    "scripts/codex_loop.py": "9797fb6674dc2e05d9065cb720e3b331cb97dbb2f47b9582f502ca465cbc11dc",
+    "tests/test_review.py": "04bc8b46b28f4f3010fef8662e5d983ec234b38506296e7fa6e607422d791ee8"
+  },
+  "test_count": 66,
+  "test_exit_code": 0,
+  "test_command": "python -B -m unittest discover -s tests -p \"test_*.py\" -v",
+  "scope": "Focus follow-up reviews on prior findings and the impact of repairs, retain finding identities and decisions, require new evidence for reopening closed claims, while allowing newly evidenced material regressions.",
+  "review_exit_code": 0,
+  "review_model_requested": "gpt-6.1-sol",
+  "review_result_sha256": "2ad9f12c8f015df925947806245d4c82eea4081bf1a4fa1238f30bb51dd1198b"
+}
