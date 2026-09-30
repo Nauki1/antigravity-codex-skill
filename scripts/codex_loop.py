@@ -187,6 +187,7 @@ AGENTS_TEMPLATE = """# Dual-Agent Workspace Constitution (Antigravity & Codex)
    - 严禁凭主观臆测宣称“代码已写好/Bug已修复”。
    - 任何改动完成前，必须在终端实际运行对应的构建或测试脚本，且退出码（Exit Code）为 0 方可视为通过。
 3. **关键任务异构审查 (Heterogeneous Red Teaming)**：
+   - 必须修复的问题须给出稳定 ID、位置、支持范围内的触发条件、预期与实际行为、影响，以及复现或确定的可达代码证据。未经核验的猜测保持待验证，不直接派给实施方修改。
    - 涉及核心算法、架构改造、底层鉴权或跨模块调用的变更，必须调用 `codex review` 获得 `APPROVED` 判定。
    - 审查报告先给出发现和理由，最后一行只写 `APPROVED`（无待修复问题）或 `NEEDS_FIX`（存在待修复问题）。
    - 结论只出现一次，不放入引用、代码块或示例；未完成审查时不得输出批准。
@@ -310,10 +311,20 @@ REVIEW_PROTOCOL = (
     "Keep your native review JSON schema and all actionable findings. "
     "The CLI renders overall_explanation but hides the other native fields. "
     "Therefore overall_explanation MUST be a string containing exactly one JSON "
-    "object with these fields: protocol (\"codex-loop-review-v1\"), review_complete "
+    "object with these fields: protocol (\"codex-loop-review-v2\"), review_complete "
     "(boolean), findings_count (integer equal to the native findings list length), "
     "overall_correctness (same as the native overall_correctness: \"patch is correct\" "
-    "or \"patch is incorrect\"), reason (nonempty explanation string). "
+    "or \"patch is incorrect\"), reason (nonempty explanation string), findings "
+    "(one evidence record per native finding, with the same count). Every record "
+    "must contain nonempty strings id, title, location, trigger, expected, actual, "
+    "impact, evidence, plus verified=true. Use unique stable IDs such as F1. "
+    "Copy each native title exactly; location must match its rendered absolute "
+    "path and line range (file:start-end, or file:start for a single line). "
+    "Describe a concrete supported triggering condition, the expected and actual "
+    "behavior, material impact, and reproduction or a definite reachable code path. "
+    "Do not classify speculation or preferences as verified defects. If a "
+    "potential material defect cannot be established, report an incomplete review "
+    "with the remaining uncertainty rather than assigning unverified repair work. "
     "Do not wrap this object in Markdown or add text outside it. If review could "
     "not be completed, set review_complete to false. The wrapper preserves this "
     "report and emits APPROVED only for a complete, correct review with zero findings; "
@@ -338,7 +349,7 @@ class ReviewError(RuntimeError):
         self.output = output
 
 
-def parse_review_verdict(output):
+def parse_review_report(output):
     """Validate the explicit envelope exported by the native review renderer."""
     def unique_fields(pairs):
         result = {}
@@ -352,20 +363,61 @@ def parse_review_verdict(output):
         report, end = json.JSONDecoder(object_pairs_hook=unique_fields).raw_decode(output.lstrip())
     except (ValueError, TypeError) as exc:
         raise ReviewError("审查协议 JSON 不完整或包含重复字段，未取得批准。", output) from exc
-    required = {"protocol", "review_complete", "findings_count", "overall_correctness", "reason"}
+    required = {"protocol", "review_complete", "findings_count", "overall_correctness", "reason", "findings"}
     if (
         not isinstance(report, dict) or set(report) != required
-        or report["protocol"] != "codex-loop-review-v1"
+        or report["protocol"] != "codex-loop-review-v2"
         or report["review_complete"] is not True
         or type(report["findings_count"]) is not int or report["findings_count"] < 0
         or report["overall_correctness"] not in ("patch is correct", "patch is incorrect")
         or not isinstance(report["reason"], str) or not report["reason"].strip()
     ):
         raise ReviewError("审查协议缺少有效的完整结论，未取得批准。", output)
+    if not isinstance(report["findings"], list) or len(report["findings"]) != report["findings_count"]:
+        raise ReviewError("审查发现数量与证据记录不一致，未取得批准。", output)
+    finding_fields = {"id", "title", "location", "trigger", "expected", "actual", "impact", "evidence", "verified"}
+    ids = set()
+    for finding in report["findings"]:
+        if (
+            not isinstance(finding, dict) or set(finding) != finding_fields
+            or finding["verified"] is not True
+            or any(not isinstance(finding[key], str) or not finding[key].strip() for key in finding_fields - {"verified"})
+            or finding["id"] in ids
+        ):
+            raise ReviewError("审查发现缺少可核验的完整证据或 ID 重复，保持待审查。", output)
+        ids.add(finding["id"])
     # The renderer appends native findings after overall_explanation. Such text
     # must never be ignored when a zero-findings approval is claimed.
-    if output.lstrip()[end:].strip() and report["findings_count"] == 0:
+    trailer = output.lstrip()[end:].strip()
+    if trailer and report["findings_count"] == 0:
         raise ReviewError("零发现结论后仍有额外内容，未取得批准。", output)
+    if report["findings"]:
+        lines = trailer.splitlines()
+        if not lines or lines[0] not in ("Review comment:", "Full review comments:"):
+            raise ReviewError("缺少对应的原生问题列表，保持待审查。", output)
+        rows = []
+        def normalize_row(row):
+            row = row.replace("\\", "/")
+            prefix, colon, span = row.rpartition(":")
+            start, dash, finish = span.partition("-")
+            if colon and start.isascii() and start.isdigit() and (not dash or (finish.isascii() and finish.isdigit() and int(start) == int(finish))):
+                return f"{prefix}:{int(start)}"
+            return row
+        for line in lines[1:]:
+            if line.startswith("- "):
+                rows.append(normalize_row(line))
+            elif line.strip() and not line.startswith("  "):
+                raise ReviewError("原生问题列表含有未知或矛盾内容，保持待审查。", output)
+        expected_rows = [normalize_row(f"- {finding['title']} — {finding['location']}") for finding in report["findings"]]
+        if sorted(rows) != sorted(expected_rows):
+            raise ReviewError("原生问题与证据记录不对应，保持待审查。", output)
+    if not report["findings"] and report["overall_correctness"] == "patch is incorrect":
+        raise ReviewError("整体结论错误但没有具体缺陷证据，保持待审查。", output)
+    return report
+
+
+def parse_review_verdict(output):
+    report = parse_review_report(output)
     if report["findings_count"] or report["overall_correctness"] == "patch is incorrect":
         return "NEEDS_FIX"
     return "APPROVED"

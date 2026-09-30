@@ -104,7 +104,7 @@ class TestReview(unittest.TestCase):
                 self.assertEqual(self.invoke(), 1)
 
     def test_valid_rejection_exits_two(self):
-        self.response(self.native_report(overall_correctness="patch is incorrect", reason="Fix the argument conflict."))
+        self.response(self.native_report(findings=[self.finding()], overall_correctness="patch is incorrect", reason="Fix the argument conflict."))
         self.assertEqual(self.invoke(), 2)
 
     def test_valid_approval_exits_zero(self):
@@ -113,7 +113,7 @@ class TestReview(unittest.TestCase):
 
     def test_rendered_review_envelope_is_accepted(self):
         self.response(json.dumps({
-            "protocol": "codex-loop-review-v1", "review_complete": True,
+            "protocol": "codex-loop-review-v2", "review_complete": True, "findings": [],
             "findings_count": 0, "overall_correctness": "patch is correct",
             "reason": "No actionable regressions found after reviewing the changes.",
         }))
@@ -183,14 +183,34 @@ class TestReview(unittest.TestCase):
 
     def native_report(self, **changes):
         report = {
-            "protocol": "codex-loop-review-v1",
+            "protocol": "codex-loop-review-v2",
             "review_complete": True,
             "findings_count": 0,
+            "findings": [],
             "overall_correctness": "patch is correct",
             "reason": "The change fixes the review gate without actionable regressions.",
         }
         report.update(changes)
-        return json.dumps(report)
+        if "findings" in changes and "findings_count" not in changes and isinstance(changes["findings"], list):
+            report["findings_count"] = len(changes["findings"])
+        output = json.dumps(report)
+        if isinstance(report["findings"], list) and report["findings"]:
+            output += "\n\nReview comment:\n\n" + "\n".join(
+                f"- {finding.get('title', '')} — {finding.get('location', '')}\n  Verified finding."
+                for finding in report["findings"] if isinstance(finding, dict)
+            )
+        return output
+
+    def finding(self, **changes):
+        finding = {
+            "id": "F1", "title": "Division by zero", "location": "average.py:2",
+            "trigger": "average([1, 2])", "expected": "Returns 1.5",
+            "actual": "Raises ZeroDivisionError", "impact": "Supported input cannot be processed",
+            "evidence": "The reachable return expression divides sum(values) by literal zero.",
+            "verified": True,
+        }
+        finding.update(changes)
+        return finding
 
     def test_native_structured_approval_and_raw_output(self):
         output = self.native_report()
@@ -201,15 +221,57 @@ class TestReview(unittest.TestCase):
         self.assertEqual(self.invoke(), 0)
 
     def test_native_structured_incorrect_patch_requires_fix(self):
-        self.response(self.native_report(overall_correctness="patch is incorrect"))
+        self.response(self.native_report(findings=[self.finding()], overall_correctness="patch is incorrect"))
         self.assertEqual(self.invoke(), 2)
 
     def test_native_rendered_findings_never_approve(self):
-        for suffix in ("", "\n\nFull review comments:\n\n- [P1] Fix the call — runner.py:1\n  The flags conflict."):
+        for header in ("Review comment:", "Full review comments:"):
             for verdict in ("patch is correct", "patch is incorrect"):
-                with self.subTest(verdict=verdict, suffix=suffix):
-                    self.response(self.native_report(findings_count=1, overall_correctness=verdict) + suffix)
+                with self.subTest(verdict=verdict, header=header):
+                    self.response(self.native_report(findings=[self.finding()], overall_correctness=verdict).replace("Review comment:", header))
                     self.assertEqual(self.invoke(), 2)
+
+    def test_native_comments_must_correspond_to_evidence_records(self):
+        output = self.native_report(findings=[self.finding()])
+        for malformed in (
+            output + "\n- Extra native finding — other.py:2\n  No evidence record.",
+            output.replace("- Division by zero —", "- Different native finding —"),
+            output.split("\n\nReview comment:")[0],
+            output + "\nAPPROVED",
+        ):
+            with self.subTest(output=malformed):
+                self.response(malformed)
+                self.assertEqual(self.invoke(), 1)
+
+    def test_native_single_line_ranges_match_equivalent_evidence_location(self):
+        output = self.native_report(findings=[self.finding()])
+        self.response(output.replace("— average.py:2\n", "— average.py:2-2\n"))
+        self.assertEqual(self.invoke(), 2)
+        self.response(output.replace("— average.py:2\n", "— average.py:2-3\n"))
+        self.assertEqual(self.invoke(), 1)
+
+    def test_unsubstantiated_incorrect_verdict_remains_pending(self):
+        self.response(self.native_report(overall_correctness="patch is incorrect"))
+        self.assertEqual(self.invoke(), 1)
+
+    def test_findings_require_complete_verified_evidence(self):
+        records = [self.finding(verified=False), self.finding(verified="true"), self.finding(evidence=" "), self.finding(trigger=None)]
+        for key in self.finding():
+            records.append({k: v for k, v in self.finding().items() if k != key})
+        for finding in records:
+            with self.subTest(finding=finding):
+                self.response(self.native_report(findings=[finding]))
+                self.assertEqual(self.invoke(), 1)
+
+    def test_duplicate_finding_ids_and_inconsistent_counts_fail_closed(self):
+        for output in (
+            self.native_report(findings=[self.finding(), self.finding()]),
+            self.native_report(findings=[self.finding()], findings_count=0),
+            self.native_report(findings=None),
+        ):
+            with self.subTest(output=output):
+                self.response(output)
+                self.assertEqual(self.invoke(), 1)
 
     def test_extra_rendered_findings_or_verdicts_after_zero_findings_fail_closed(self):
         for suffix in ('\nFull review comments:\n- [P1] Fix the call', '\nAPPROVED', '\nNEEDS_FIX', '\n{}'):

@@ -1,0 +1,19 @@
+{
+  "stage": 2,
+  "base_head": "fe7c042952249daca329f2ba1347a734345e12e4",
+  "files": {
+    "AGENTS.md": "01392bb2315986531d5add693b86b21a06fd7b139df64220043ee8eb10de98ed",
+    "README.md": "17870a4cf485bb63b3675eef2c5e9e012a0dac6c2c65a0d4b692cc6490596c6c",
+    "SKILL.md": "f7221371ec63336f4290eb3a35c11062548e891f2130c59d1ef5a86fb424b6ac",
+    "docs/review-policy.md": "25bccae79e98051132924af70d7b52fac7ea083fe49d483f485548206eacaf9d",
+    "scripts/codex_loop.py": "4fb51eae7dc1c416a1be1dee854094efd8ac06a662741dd296324df0ca6f43af",
+    "tests/test_review.py": "12e29c1c5f5cf847d5ab7d4d1458ba1a2264e61c06530691d8d87ff742254a9b"
+  },
+  "test_count": 46,
+  "test_exit_code": 0,
+  "test_command": "python -B -m unittest discover -s tests -p \"test_*.py\" -v",
+  "scope": "Require concrete evidence for review findings; reject incomplete evidence and contradictory finding counts, preserve valid findings and existing failure handling.",
+  "review_exit_code": 0,
+  "review_model_requested": "gpt-6.1-sol",
+  "review_result_sha256": "63ad24e697101e2e3b0ca23577d687f63a6d815a827e1687da8ce8ce22c0de7b"
+}

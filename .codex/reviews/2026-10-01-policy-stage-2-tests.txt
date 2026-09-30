@@ -1,0 +1,71 @@
+test_argument_parsing_project_precedence (test_codex_loop.TestCodexLoopTargetProject.test_argument_parsing_project_precedence) ... ok
+test_get_current_info_with_target (test_codex_loop.TestCodexLoopTargetProject.test_get_current_info_with_target) ... ok
+test_init_target_project_append_to_existing_agents (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_append_to_existing_agents) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_8xvea7ej
+  - [APPEND] 已写入: AGENTS.md
+  - [CREATE] 已写入: .codex-loop.toml
+[*] 目标工程初始化完成！
+ok
+test_init_target_project_dry_run (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_dry_run) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_geejds8v
+[*] Dry-run 模式：以下文件将被创建或修改：
+  - [CREATE] C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_geejds8v\AGENTS.md
+  - [CREATE] C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_geejds8v\.codex-loop.toml
+ok
+test_init_target_project_fresh (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_fresh) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test__u1m5nyv
+  - [CREATE] 已写入: AGENTS.md
+  - [CREATE] 已写入: .codex-loop.toml
+[*] 目标工程初始化完成！
+ok
+test_init_target_project_idempotent (test_codex_loop.TestCodexLoopTargetProject.test_init_target_project_idempotent) ... [*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_q0si9vo8
+  - [CREATE] 已写入: AGENTS.md
+  - [CREATE] 已写入: .codex-loop.toml
+[*] 目标工程初始化完成！
+[*] 正在初始化目标工程: C:\Users\Nauki\AppData\Local\Temp\codex_loop_test_q0si9vo8
+  - [已存在] AGENTS.md 已包含双智能体协同规范，跳过增补。
+  - [已存在] .codex-loop.toml 已存在，跳过创建。
+[*] 目标工程初始化完成！
+ok
+test_resolve_target_project_default_cwd (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_default_cwd) ... ok
+test_resolve_target_project_explicit_valid (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_explicit_valid) ... ok
+test_resolve_target_project_file_not_dir (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_file_not_dir) ... ok
+test_resolve_target_project_nonexistent (test_codex_loop.TestCodexLoopTargetProject.test_resolve_target_project_nonexistent) ... ok
+test_base_review_pins_merge_base_without_conflicting_flags (test_review.TestReview.test_base_review_pins_merge_base_without_conflicting_flags) ... ok
+test_cli_conflicting_arguments_rejected_before_launch (test_review.TestReview.test_cli_conflicting_arguments_rejected_before_launch) ... ok
+test_conflicting_scope_and_prompt_rejected_before_launch (test_review.TestReview.test_conflicting_scope_and_prompt_rejected_before_launch) ... ok
+test_custom_instructions_use_prompt_without_target_flags (test_review.TestReview.test_custom_instructions_use_prompt_without_target_flags) ... ok
+test_default_review_uses_custom_uncommitted_scope_and_target_cwd (test_review.TestReview.test_default_review_uses_custom_uncommitted_scope_and_target_cwd) ... ok
+test_default_task_is_read_from_target_project (test_review.TestReview.test_default_task_is_read_from_target_project) ... ok
+test_duplicate_finding_ids_and_inconsistent_counts_fail_closed (test_review.TestReview.test_duplicate_finding_ids_and_inconsistent_counts_fail_closed) ... ok
+test_empty_scope_is_rejected_before_launch (test_review.TestReview.test_empty_scope_is_rejected_before_launch) ... ok
+test_executable_missing_is_execution_failure (test_review.TestReview.test_executable_missing_is_execution_failure) ... ok
+test_explanations_with_code_and_labels_do_not_change_verdict (test_review.TestReview.test_explanations_with_code_and_labels_do_not_change_verdict) ... ok
+test_explicit_approval_with_crlf_and_trailing_blank_lines (test_review.TestReview.test_explicit_approval_with_crlf_and_trailing_blank_lines) ... ok
+test_explicit_task_path_is_relative_to_target (test_review.TestReview.test_explicit_task_path_is_relative_to_target) ... ok
+test_extra_rendered_findings_or_verdicts_after_zero_findings_fail_closed (test_review.TestReview.test_extra_rendered_findings_or_verdicts_after_zero_findings_fail_closed) ... ok
+test_findings_require_complete_verified_evidence (test_review.TestReview.test_findings_require_complete_verified_evidence) ... ok
+test_implicit_task_created_during_review_invalidates_approval (test_review.TestReview.test_implicit_task_created_during_review_invalidates_approval) ... ok
+test_invalid_base_fails_before_review_launch (test_review.TestReview.test_invalid_base_fails_before_review_launch) ... ok
+test_invalid_or_incomplete_native_reports_fail_closed (test_review.TestReview.test_invalid_or_incomplete_native_reports_fail_closed) ... ok
+test_large_task_does_not_expand_windows_command_line (test_review.TestReview.test_large_task_does_not_expand_windows_command_line) ... ok
+test_missing_empty_and_invalid_utf8_tasks_fail_before_launch (test_review.TestReview.test_missing_empty_and_invalid_utf8_tasks_fail_before_launch) ... ok
+test_missing_raw_report_never_uses_rendered_approval (test_review.TestReview.test_missing_raw_report_never_uses_rendered_approval) ... ok
+test_native_comments_must_correspond_to_evidence_records (test_review.TestReview.test_native_comments_must_correspond_to_evidence_records) ... ok
+test_native_rendered_findings_never_approve (test_review.TestReview.test_native_rendered_findings_never_approve) ... ok
+test_native_single_line_ranges_match_equivalent_evidence_location (test_review.TestReview.test_native_single_line_ranges_match_equivalent_evidence_location) ... ok
+test_native_structured_approval_and_raw_output (test_review.TestReview.test_native_structured_approval_and_raw_output) ... ok
+test_native_structured_incorrect_patch_requires_fix (test_review.TestReview.test_native_structured_incorrect_patch_requires_fix) ... ok
+test_negative_quoted_unknown_and_incomplete_outputs_never_approve (test_review.TestReview.test_negative_quoted_unknown_and_incomplete_outputs_never_approve) ... ok
+test_nonzero_process_with_approval_is_execution_failure (test_review.TestReview.test_nonzero_process_with_approval_is_execution_failure) ... ok
+test_raw_report_invalid_utf8_is_execution_failure (test_review.TestReview.test_raw_report_invalid_utf8_is_execution_failure) ... ok
+test_raw_result_preserved (test_review.TestReview.test_raw_result_preserved) ... ok
+test_rendered_review_envelope_is_accepted (test_review.TestReview.test_rendered_review_envelope_is_accepted) ... ok
+test_result_file_is_cleaned_after_process_failure (test_review.TestReview.test_result_file_is_cleaned_after_process_failure) ... ok
+test_task_changed_during_review_invalidates_approval (test_review.TestReview.test_task_changed_during_review_invalidates_approval) ... ok
+test_unknown_output_is_invalid_result (test_review.TestReview.test_unknown_output_is_invalid_result) ... ok
+test_unsubstantiated_incorrect_verdict_remains_pending (test_review.TestReview.test_unsubstantiated_incorrect_verdict_remains_pending) ... ok
+test_valid_approval_exits_zero (test_review.TestReview.test_valid_approval_exits_zero) ... ok
+test_valid_rejection_exits_two (test_review.TestReview.test_valid_rejection_exits_two) ... ok
+
+----------------------------------------------------------------------
+Ran 46 tests in 0.328s
+
+OK
