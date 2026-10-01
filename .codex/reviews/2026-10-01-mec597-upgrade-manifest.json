@@ -1,0 +1,21 @@
+{
+  "base_head": "534d30213398690162df9adf96ed4b3746333b3a",
+  "files": {
+    ".gitignore": "a29db193ba34788e055d222b51b8890f211c0503f2763804d886a6b6ff2a3485",
+    "AGENTS.md": "678c613c2fd648e47582aa69d30bd9756b3c49640ecbea6785d4047e92469c5b",
+    "README.md": "16f358c044b28507a240f6b9c6b35dbbb15041bde97ee6aea8e248bd3d7a7648",
+    "SKILL.md": "992449fc17c0391bb13739648ccea4363f8c20f8eb373d89b4696e2327b0b8cb",
+    "docs/phase-checkpoints.md": "081cae8914f56c4af3b5a23347e9950c50007159b1bee7360c9d01787a99e1e3",
+    "docs/review-policy.md": "a92efd8bb378eee080848af0dde0958434564086679d7cc35ca0fea0eb4e94df",
+    "docs/tasks/review-triage-upgrade.md": "c3acfce73d9e1fcc05e4a7381fc037c0203e0fa71cbac9d05285f0411d7d2161",
+    "scripts/codex_loop.py": "ab0d54167fa7833619692b5aab1bce3940fa6f63ab682644e40642b869a4fb94",
+    "tests/test_codex_loop.py": "ebaa6669d5533be82761ad1c8ff10ad9cbcd66bf068650b3a876775058a012df",
+    "tests/test_review.py": "73d734be8f23d8e19880c64a4f940314df21983a121aa2923a015ec4c959eca5"
+  },
+  "test_exit_code": 0,
+  "skill_validation_exit_code": 0,
+  "review_exit_code": 0,
+  "review_attempt": 2,
+  "review_output_sha256": "6bebd918e4cbf94fc938c7e9cb23289784ea2425c8142c0586f2ea7d71959c12",
+  "review_model": "gpt-6.1-sol"
+}

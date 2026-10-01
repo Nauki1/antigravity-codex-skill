@@ -77,14 +77,18 @@ python scripts/codex_loop.py plan "为项目增加基于 JWT 的认证与双因�
 python scripts/codex_loop.py review
 ```
 - 返回 `0`：有效结论为 **APPROVED**，审查通过。
+- 返回 `0` 且为 **APPROVED_WITH_NOTES**：只有建议项，列出建议后收工。
 - 返回 `2`：有效结论为 **NEEDS_FIX**，需要修复后复审。
 - 返回 `1`：调用失败，或报告为空、缺少有效结论、存在引用或矛盾；任务保持待审查。
+- 返回 `3`：默认连续3次未获批触发熔断，生成《待裁决争议报告》，停止审查与自动返工。可用 `--max-iterations` 在新周期开始前设置上限。
 
 默认审查 staged、unstaged 和 untracked 变更；`--base` 审查指定分支与 HEAD 的 merge base 之后的已跟踪差异；`--instructions` 增加未提交变更的审查重点。`--base` 与 `--instructions` 不能同时使用。包装器统一使用原生自定义审查 PROMPT，附加结果协议，不混用原生 CLI 的 `--uncommitted` / `--base` 与 PROMPT。[OpenAI 参数文档](https://learn.chatgpt.com/docs/developer-commands)
 
-原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出当前 `codex-loop-review-v3` 协议 JSON。CLI 渲染解释并附加发现详情。审查完成、验收达标、整体正确、没有已核验实质缺陷或待决疑点/争议时批准；可选建议放入 `advisories`，可以带建议收工。未核验实质疑点放入 `uncertainties`，不直接派发返工。字段缺失、重复、类型错误或不完整均不放行；v2 只用于历史输入。
+原生审查器保持自己的 JSON schema，在 `overall_explanation` 内输出当前 `codex-loop-review-v4`。发现明确分为 BLOCKER/CRITICAL 与 SUGGESTION/MINOR；数学逻辑、数据完整性、测试非0和适用规则违规阻断交付，文风、额外理论与非核心命名只生成建议。验收达标且无实质缺陷/待决问题时可返回 APPROVED_WITH_NOTES。旧 v2/v3 只用于历史输入；字段缺失、重复、类型错误或不完整均不放行。
 
 底层使用 `codex exec review --ephemeral --output-last-message <临时文件>` 取得渲染后的最终报告，而不是假设它导出原生 JSON。包装器保留完整报告，再输出对应的末行结论。进程失败、基线解析失败或临时结果缺失时返回 `1`；结果文件在读取后自动清理，不写入目标工程。
+
+调用和比对临时资产只放在工程外的系统临时目录，显式 finally 清理；禁止在业务根目录手工创建 `.review*` 或时间戳快照。`init` 会幂等增补 Git 忽略规则作兜底。复杂任务按 [四阶段协议](docs/phase-checkpoints.md) 执行，并在阶段进入、结束或实际阻塞时提供简短进度卡片。
 
 普通的 `LGTM`、否定、引用或代码示例中的批准词不会放行。协议通过调用提示词传入；已有目标工程无需修改规则来适配审批解析。
 

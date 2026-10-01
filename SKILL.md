@@ -33,8 +33,10 @@ It enforces a **Loosely Coupled, Shared-Workspace** architecture:
 
 ## 常用操作与协作流程 (Workflow & Commands)
 
+复杂任务显式遵循四阶段生命周期：`[Phase 1: 资产摸底与约束冻结] -> [Phase 2: 核心实施与测试] -> [Phase 3: 异构独立审查] -> [Phase 4: 交付归档与提交]`。各命令是阶段内的操作。进入、结束阶段及发生实际阻塞时，给用户短卡片：阶段、已完成事项、可核验证据、下一步、实际阻塞。实施与审查失败不能标为完成；具体完成条件及卡片示例见 [阶段协议](docs/phase-checkpoints.md)。
+
 ### 0. 目标工程接入与初始化 (Target Init)
-在目标业务工程中接入双智能体协同规范（轻量幂等增补 `AGENTS.md` 与 `.codex-loop.toml`）：
+在目标业务工程中接入双智能体协同规范（幂等增补 `AGENTS.md`、`.codex-loop.toml` 与 `.gitignore`）。保留既有规则，默认忽略 `.review*`、`.agents/sessions/*.tmp` 和内部计数；旧协作模板会追加当前阶段与审查规则：
 ```bash
 python <SKILL_PATH>/scripts/codex_loop.py init [--project <TARGET_DIR>] [--dry-run]
 ```
@@ -63,22 +65,23 @@ python <SKILL_PATH>/scripts/codex_loop.py plan "<TASK_REQUIREMENT>" [--out docs/
 #### Step 3: 异构独立审查 (Codex Review)
 Codex 审查工作区未提交变更，拦截逻辑漏洞与回归隐患：
 ```bash
-python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
+python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>] [--max-iterations 3]
 ```
 审查默认读取目标工程的 `docs/task.md`（存在时），也可用 `--task <PATH>` 指定验收标准。路径相对目标工程解析；显式文件缺失、为空或无法读取时不启动审查。任务内容以快照传入，审查期间标准变化则本次批准失效。可选优化和支持范围之外的需求不成为强制返工任务；相关安全、数据完整性及已有功能回归仍须检查。
-- 返回码 `0`：有效结论为 **APPROVED**，审查通过。
+- 返回码 `0`：有效结论为 **APPROVED** 或 **APPROVED_WITH_NOTES**，审查通过；建议清单可以保留。
 - 返回码 `2`：有效结论为 **NEEDS_FIX**，进入修复循环。
 - 返回码 `1`：调用失败或报告没有有效结论，保持待审查，不能提交交付。
+- 返回码 `3`：同一任务的连续未获批审查已熔断，提供《待裁决争议报告》并停止审查和自动修复，交由用户决定。
 
 审查模式互斥：默认审查 staged、unstaged 和 untracked 变更；`--base <REF>` 先解析 REF 与 HEAD 的 merge base，再审查其后的已跟踪差异；`--instructions "审查重点"` 增加未提交变更的审查重点。`--base` 与 `--instructions` 不能组合。底层统一使用原生自定义审查 PROMPT，以便附加结果协议；不与原生 `--base` / `--uncommitted` 标志混用。
 
-原生审查器保持自己的 JSON schema，在 `overall_explanation` 字符串内输出当前 `codex-loop-review-v3` 协议 JSON。CLI 渲染此解释并附加发现详情。审查完成、验收达标、整体正确、没有已核验实质缺陷或待决疑点/争议时批准；可选建议放入 `advisories`，可带建议收工。未核验实质疑点放入 `uncertainties`，不能直接派发返工。结构缺失、字段重复、类型错误或未知附加内容不放行。v2 仅可作历史输入。
+原生审查器保持自己的 JSON schema，在 `overall_explanation` 内输出 `codex-loop-review-v4`。每个发现带明确 `severity`：数学逻辑错误、数据篡改/损坏、规定测试非0和违反适用 AGENTS.md 铁律归 BLOCKER/CRITICAL；文风、额外理论推导、非核心命名归 SUGGESTION/MINOR。后两者输出建议清单及 APPROVED_WITH_NOTES，不阻断交付；建议也可放入含 severity/message 的 `advisories`。验收未完成、实质疑点或争议未决时不批准，也不盲目派发修复。旧 v2/v3 仅作历史输入。完整规则见 [审查政策](docs/review-policy.md)。
 
 每个发现必须包含唯一稳定 ID、位置、具体触发条件、预期行为、实际行为、影响、复现或确定的可达代码证据，以及明确的核验状态。包装器检查证据字段与数量的一致性；证据缺失、未经核验、ID 重复，或只给出“整体错误”却无具体问题时，保持待审查，不自动要求返工。字段检查不能替代审查器对证据真实性的核验。
 
-底层通过 `codex exec review --ephemeral --output-last-message <临时文件>` 取得渲染后的最终报告，并保留完整内容。此选项不导出原生 JSON。调用、基线解析或结果读取失败时返回 `1`，临时文件读取后自动清理，不写入目标工程。
+底层通过 `codex exec review --ephemeral --output-last-message <临时文件>` 取得渲染后的最终报告。调用和比对临时资产统一放在目标工程外的系统 `TemporaryDirectory`，显式 finally 清理，包括失败、异常和可捕获中断。禁止代理手工创建业务根目录 `.review*` 或时间戳快照；`--out` 的持久报告由用户显式指定，熔断记录放在 `.codex/codex-loop/`。
 
-包装器负责输出项目约定的 `APPROVED` / `NEEDS_FIX` 末行结论。协议通过调用提示词传入，已有目标工程无需修改规则来适配审批解析。不能把 CLI 执行成功、自然语言措辞、否定、引用或代码示例中的批准词当成批准。
+包装器输出 `APPROVED` / `APPROVED_WITH_NOTES` / `NEEDS_FIX` 末行结论。不能把进程成功、自然语言、否定、引用或代码示例当成批准。新模板允许带建议批准；已有业务规则用 `init` 幂等追加协议补充。
 
 #### Step 4: 修复闭环 (Remediation Loop)
 - 首次审查用 `--out reviews/first.txt` 保存原始报告。
@@ -87,6 +90,7 @@ python <SKILL_PATH>/scripts/codex_loop.py review [--project <TARGET_DIR>]
 - 后续使用最近报告聚焦复审上轮问题、修复及相关回归，延续全部旧 ID 和关闭记录。已关闭问题须用 `reopened` 和额外 `new_evidence` 明确重开；范围内新发现仍需核验证据，不追加无关优化要求。
 - 自动修复须用 `fix --review reviews/first.txt --task docs/task.md`，读取 `review --out` 保存的原报告与 `.context.json`。默认最多2轮，配置可在新周期前设置；启动前计数，失败或中断也消耗轮次，同一审查不得重复派发。
 - `fix` 返回 `3` 表示到达上限、验收变化或存在待决问题，停止并交由用户决定。不得改用 `exec-agy`、删除计数、换任务路径或调高参数绕过。新周期须用户明确授权并记录；工具不自动重置。返回 `0` 的实施执行仍须复测与独立审查，不等同交付批准。
+- 审查另有 `--max-iterations`（默认3）跨命令熔断，覆盖直接反复运行 `review` 的情况。第3次仍未获批生成争议报告并返回3；同一未获批周期不能通过重新启动或提高参数续跑。批准（含建议批准）结束连续失败序列。熔断后不能继续自动派发修复。
 
 ---
 

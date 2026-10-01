@@ -16,3 +16,8 @@ venv/
 # Operating System
 .DS_Store
 Thumbs.db
+
+# codex-loop runtime and temporary assets
+.review*
+.agents/sessions/*.tmp
+.codex/codex-loop/

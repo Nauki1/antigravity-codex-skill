@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -19,6 +20,9 @@ class TestReview(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="review 中文 ")
         self.addCleanup(self.temp.cleanup)
         self.target = self.temp.name
+        # Output-contract cases intentionally exercise many reports in one fixture.
+        # Fuse scenarios below use the production default instead.
+        self.max_iterations = 200
         self.runner = self.enterContext(patch.object(codex_loop.subprocess, "run"))
         self.enterContext(patch.object(codex_loop, "get_current_info", return_value={"active_model": "test-model"}))
         self.enterContext(patch.object(codex_loop, "CODEX_BIN", "test-codex"))
@@ -37,11 +41,12 @@ class TestReview(unittest.TestCase):
         self.runner.side_effect = run
 
     def review(self, **kwargs):
+        kwargs.setdefault("max_iterations", self.max_iterations)
         return codex_loop.run_review(target_project=self.target, **kwargs)
 
     def invoke(self, *args):
         with self.assertRaises(SystemExit) as caught:
-            codex_loop.main(["review", "--project", self.target, *args])
+            codex_loop.main(["review", "--project", self.target, "--max-iterations", str(self.max_iterations), *args])
         return caught.exception.code
 
     def test_explicit_approval_with_crlf_and_trailing_blank_lines(self):
@@ -113,7 +118,7 @@ class TestReview(unittest.TestCase):
 
     def test_rendered_review_envelope_is_accepted(self):
         self.response(json.dumps({
-            "protocol": "codex-loop-review-v3", "review_complete": True, "findings": [],
+            "protocol": "codex-loop-review-v4", "review_complete": True, "findings": [],
             "findings_count": 0, "overall_correctness": "patch is correct",
             "reason": "No actionable regressions found after reviewing the changes.",
             "acceptance_met": True, "advisories": [], "uncertainties": [],
@@ -184,7 +189,7 @@ class TestReview(unittest.TestCase):
 
     def native_report(self, **changes):
         report = {
-            "protocol": "codex-loop-review-v3",
+            "protocol": "codex-loop-review-v4",
             "review_complete": True,
             "findings_count": 0,
             "findings": [],
@@ -193,6 +198,8 @@ class TestReview(unittest.TestCase):
             "acceptance_met": True, "advisories": [], "uncertainties": [],
         }
         report.update(changes)
+        if isinstance(report["advisories"], list):
+            report["advisories"] = [{"severity": "SUGGESTION", "message": item} if isinstance(item, str) else item for item in report["advisories"]]
         if "adjudications" in changes and "history" not in changes:
             report["history"] = [{key: self.finding(id=item["finding_id"])[key] for key in ("id", "title", "location", "trigger")} for item in changes["adjudications"]]
         if "findings" in changes and "findings_count" not in changes and isinstance(changes["findings"], list):
@@ -212,6 +219,7 @@ class TestReview(unittest.TestCase):
             "actual": "Raises ZeroDivisionError", "impact": "Supported input cannot be processed",
             "evidence": "The reachable return expression divides sum(values) by literal zero.",
             "verified": True,
+            "severity": "CRITICAL",
         }
         finding.update(changes)
         return finding
@@ -632,7 +640,7 @@ class TestReview(unittest.TestCase):
         pending = self.save_fix_review(uncertainties=["Material fact not established"])
         self.assertEqual(self.invoke_fix(pending), 3)
         agy.assert_not_called()
-        self.assertFalse((Path(self.target) / ".codex/codex-loop").exists())
+        self.assertEqual(list((Path(self.target) / ".codex/codex-loop").glob("fix-*.json")), [])
 
     def test_modified_report_or_task_context_stops_before_execution(self):
         agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
@@ -648,8 +656,206 @@ class TestReview(unittest.TestCase):
         agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
         self.assertEqual(self.invoke_fix(self.save_fix_review()), 0)
         (Path(self.target) / "docs/task.md").write_text("Changed acceptance.", encoding="utf-8")
-        self.assertEqual(self.invoke_fix(self.save_fix_review()), 3)
+        self.response(self.native_report(findings=[self.finding()]))
+        self.assertEqual(self.invoke("--out", "new-review.txt"), 3)
+        self.assertFalse((Path(self.target) / "new-review.txt").exists())
         self.assertEqual(agy.call_count, 1)
+
+    def test_severity_triage_returns_notes_for_minor_findings_and_blocks_core_errors(self):
+        for severity in ("SUGGESTION", "MINOR", "BLOCKER", "CRITICAL"):
+            for correctness in ("patch is correct", "patch is incorrect"):
+                finding = self.finding(severity=severity)
+                if severity in ("SUGGESTION", "MINOR"):
+                    finding.update(title="Optional comment polish", trigger="Reading the explanatory comment", expected="Existing wording satisfies acceptance", actual="A synonym may read more clearly", impact="No correctness or scope impact", evidence="Only the comment wording would change; the mathematical expression is correct.")
+                raw = self.native_report(findings=[finding], overall_correctness=correctness)
+                self.response(raw)
+                self.assertEqual(self.invoke(), 0 if severity in ("SUGGESTION", "MINOR") else 2)
+                self.assertEqual(codex_loop.parse_review_verdict(raw), "APPROVED_WITH_NOTES" if severity in ("SUGGESTION", "MINOR") else "NEEDS_FIX")
+
+    def test_suggestion_list_is_printed_and_never_dispatched(self):
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        report = self.save_fix_review(findings=[], overall_correctness="patch is correct", advisories=[{"severity": "MINOR", "message": "Optional wording polish"}])
+        self.assertEqual(self.invoke_fix(report), 0)
+        agy.assert_not_called()
+
+    def test_missing_or_invalid_severity_never_silently_downgrades(self):
+        missing = self.finding()
+        del missing["severity"]
+        for finding in (missing, self.finding(severity="UNKNOWN"), self.finding(severity="critical")):
+            self.response(self.native_report(findings=[finding]))
+            self.assertEqual(self.invoke(), 1)
+        for note in ({"severity": "CRITICAL", "message": "Math bug"}, {"severity": "MINOR", "message": " "}, {"message": "Missing severity"}):
+            self.response(self.native_report(advisories=[note]))
+            self.assertEqual(self.invoke(), 1)
+
+    def test_review_fuse_stops_after_three_calls_and_blocks_further_reviews_and_fixes(self):
+        self.max_iterations = 3
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        self.response(self.native_report(findings=[self.finding()], overall_correctness="patch is incorrect"))
+        for expected in (2, 2, 3):
+            self.assertEqual(self.invoke("--out", "last.txt"), expected)
+        self.assertEqual(self.runner.call_count, 3)
+        self.assertEqual(self.invoke("--max-iterations", "24"), 3)
+        self.assertEqual(self.invoke_fix(Path(self.target) / "last.txt"), 3)
+        self.assertEqual(self.runner.call_count, 3)
+        agy.assert_not_called()
+        report = next((Path(self.target) / ".codex/codex-loop").glob("*.dispute.md"))
+        text = report.read_text(encoding="utf-8")
+        self.assertIn("待裁决争议报告", text)
+        self.assertIn("Division by zero", text)
+        self.assertIn("F1", text)
+        self.assertFalse(list(Path(self.target).glob(".review*")))
+
+    def test_approval_with_notes_on_third_iteration_ends_the_failure_sequence(self):
+        self.max_iterations = 3
+        self.response(self.native_report(findings=[self.finding()]))
+        self.assertEqual(self.invoke(), 2)
+        self.assertEqual(self.invoke(), 2)
+        self.response(self.native_report(advisories=[{"severity": "SUGGESTION", "message": "Optional theory derivation"}]))
+        self.assertEqual(self.invoke(), 0)
+        self.assertFalse(list((Path(self.target) / ".codex/codex-loop").glob("*.dispute.md")))
+        # A later successful task review is not a fourth failure in the old sequence.
+        self.assertEqual(self.invoke(), 0)
+
+    def test_invalid_final_results_and_interrupted_processes_cannot_reset_review_limit(self):
+        self.max_iterations = 3
+        self.response("not a review result")
+        self.assertEqual(self.invoke(), 1)
+        self.assertEqual(self.invoke(), 1)
+        self.assertEqual(self.invoke(), 3)
+        self.assertEqual(self.invoke(), 3)
+        self.assertEqual(self.runner.call_count, 3)
+
+    def test_corrupt_cycle_state_fails_closed_without_launch(self):
+        self.response(self.native_report(findings=[self.finding()]))
+        self.assertEqual(self.invoke(), 2)
+        state = next((Path(self.target) / ".codex/codex-loop").glob("review-*.json"))
+        state.write_text("{}", encoding="utf-8")
+        self.runner.reset_mock()
+        self.assertEqual(self.invoke(), 1)
+        self.runner.assert_not_called()
+
+    def test_review_assets_are_outside_project_and_removed_on_every_exit_path(self):
+        cases = ("approved", "needs_fix", "invalid_report", "process_failure", "missing_report", "unicode_failure", "exception", "interrupt")
+        for mode in cases:
+            with self.subTest(mode=mode):
+                assets = []
+                def run(args, **kwargs):
+                    path = Path(args[args.index("--output-last-message") + 1])
+                    assets.append(path.parent)
+                    if mode == "exception":
+                        raise RuntimeError("Simulated process exception")
+                    if mode == "interrupt":
+                        raise KeyboardInterrupt()
+                    if mode != "missing_report":
+                        data = self.native_report(findings=[self.finding()]) if mode == "needs_fix" else self.native_report()
+                        path.write_bytes(b"\xff" if mode == "unicode_failure" else ("invalid" if mode == "invalid_report" else data).encode("utf-8"))
+                    return subprocess.CompletedProcess(args, 1 if mode == "process_failure" else 0, "", "")
+                self.runner.side_effect = run
+                if mode in ("exception", "interrupt"):
+                    with self.assertRaises(RuntimeError if mode == "exception" else KeyboardInterrupt):
+                        self.review()
+                else:
+                    self.assertEqual(self.invoke(), 0 if mode == "approved" else 2 if mode == "needs_fix" else 1)
+                self.assertEqual(len(assets), 1)
+                self.assertFalse(assets[0].is_relative_to(Path(self.target)))
+                self.assertFalse(assets[0].exists())
+                self.assertFalse(list(Path(self.target).glob(".review*")))
+
+    def test_temp_environment_cannot_redirect_review_assets_into_project(self):
+        self.response(self.native_report())
+        with patch.object(codex_loop.tempfile, "gettempdir", return_value=self.target):
+            self.assertEqual(self.invoke(), 1)
+        self.runner.assert_not_called()
+
+    def test_default_and_invalid_iteration_limits(self):
+        self.assertEqual(codex_loop.build_parser().parse_args(["review"]).max_iterations, 3)
+        for value in (0, -1, True, "3"):
+            with self.assertRaises(codex_loop.ReviewError):
+                self.review(max_iterations=value)
+        self.runner.assert_not_called()
+
+    def test_review_output_cannot_overwrite_fuse_state_and_consumes_no_iteration(self):
+        state, _ = codex_loop.review_cycle_path(Path(self.target))
+        self.response(self.native_report())
+        self.assertEqual(self.invoke("--out", str(state)), 1)
+        self.assertFalse(state.exists())
+        self.runner.assert_not_called()
+
+    def test_third_interruption_finalizes_fuse_and_blocks_unused_repair_report(self):
+        self.max_iterations = 3
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        saved = self.save_fix_review()
+        self.assertEqual(self.invoke(), 2)
+        self.runner.side_effect = KeyboardInterrupt()
+        self.assertEqual(self.invoke(), 3)
+        state_file, _ = codex_loop.review_cycle_path(Path(self.target))
+        state = codex_loop.read_review_cycle(state_file)
+        self.assertEqual((state["attempts"], state["status"]), (3, "exhausted"))
+        self.assertEqual(state["outcomes"][-1]["verdict"], "INTERRUPTED")
+        self.assertTrue(state_file.with_suffix(".dispute.md").exists())
+        self.assertEqual(self.invoke_fix(saved), 3)
+        agy.assert_not_called()
+
+    def test_repair_checks_consumed_budget_even_if_crash_left_status_active(self):
+        self.max_iterations = 3
+        agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
+        saved = self.save_fix_review()
+        self.assertEqual(self.invoke(), 2)
+        self.assertEqual(self.invoke(), 3)
+        state_file, _ = codex_loop.review_cycle_path(Path(self.target))
+        state = codex_loop.read_review_cycle(state_file)
+        state["status"] = "active"  # Last reservation persisted before abrupt termination.
+        codex_loop.atomic_json_write(state_file, state)
+        self.assertEqual(self.invoke_fix(saved), 3)
+        self.assertEqual(codex_loop.read_review_cycle(state_file)["status"], "exhausted")
+        agy.assert_not_called()
+
+    def test_overlapping_reviews_and_repairs_do_not_launch_a_second_process(self):
+        self.max_iterations = 3
+        self.response(self.native_report(findings=[self.finding()]))
+        original = self.runner.side_effect
+        started, release = threading.Event(), threading.Event()
+        result = []
+        def blocking(args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise RuntimeError("Test release timeout")
+            return original(args, **kwargs)
+        self.runner.side_effect = blocking
+        def execute():
+            try:
+                result.append(self.review()[0])
+            except BaseException as exc:
+                result.append(exc)
+        worker = threading.Thread(target=execute)
+        worker.start()
+        try:
+            self.assertTrue(started.wait(5))
+            self.assertEqual(self.invoke(), 1)
+            self.assertEqual(self.invoke_fix("unused.txt"), 1)
+            self.assertEqual(self.runner.call_count, 1)
+        finally:
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(result, [False])
+        state_file, _ = codex_loop.review_cycle_path(Path(self.target))
+        self.assertEqual(codex_loop.read_review_cycle(state_file)["attempts"], 1)
+        self.response(self.native_report(findings=[self.finding()]))
+        self.assertEqual(self.invoke(), 2)
+        self.assertEqual(self.invoke(), 3)
+        self.assertEqual(self.runner.call_count, 3)
+
+    def test_suggestion_text_appears_before_terminal_notes_verdict(self):
+        output = self.native_report(advisories=[{"severity": "MINOR", "message": "Optional extra explanation"}])
+        self.response(output)
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            self.assertEqual(self.invoke(), 0)
+        text = captured.getvalue()
+        self.assertIn("- Optional extra explanation", text)
+        self.assertEqual(text.splitlines()[-1], "APPROVED_WITH_NOTES")
 
     def test_invalid_budget_config_or_counter_never_resets(self):
         agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))

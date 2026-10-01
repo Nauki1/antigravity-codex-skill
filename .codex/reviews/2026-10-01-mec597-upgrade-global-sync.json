@@ -1,0 +1,12 @@
+{
+  "codex": {
+    "directory": "C:\\Users\\Nauki\\.agents\\skills\\codex-loop",
+    "test_exit_code": 0,
+    "run_agy_preserved": true
+  },
+  "antigravity": {
+    "directory": "C:\\Users\\Nauki\\.gemini\\config\\skills\\codex",
+    "test_exit_code": 0,
+    "run_agy_preserved": true
+  }
+}

@@ -5,6 +5,7 @@ Unit and integration tests for codex-loop target project resolution and initiali
 
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,6 +77,40 @@ class TestCodexLoopTargetProject(unittest.TestCase):
         # In dry run, files must NOT be written
         self.assertFalse(agents_md.exists())
         self.assertFalse(toml_file.exists())
+        self.assertFalse((target / ".gitignore").exists())
+
+    def test_init_ignore_patterns_preserve_existing_content_and_are_idempotent(self):
+        target = Path(self.test_dir)
+        original = b"# Existing project rules\r\nnode_modules/\r\n.review*\r\n"
+        ignore = target / ".gitignore"
+        ignore.write_bytes(original)
+        init_target_project(target_project=target)
+        first = ignore.read_bytes()
+        self.assertTrue(first.startswith(original))
+        self.assertEqual(first.count(b".review*"), 1)
+        init_target_project(target_project=target)
+        self.assertEqual(ignore.read_bytes(), first)
+        if shutil.which("git"):
+            subprocess.run(["git", "init", "-q", str(target)], check=True, capture_output=True)
+            for name in (".review-scratch/result.txt", ".agents/sessions/session.tmp", ".codex/codex-loop/review-state.json"):
+                path = target / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("test fixture", encoding="utf-8")
+            checked = subprocess.run(["git", "check-ignore", "--stdin", "-z"], cwd=target, input=b".review-scratch/result.txt\0.agents/sessions/session.tmp\0.codex/codex-loop/review-state.json\0", capture_output=True)
+            self.assertEqual(checked.returncode, 0)
+            self.assertEqual(len(checked.stdout.rstrip(b"\0").split(b"\0")), 3, checked.stdout + checked.stderr)
+
+    def test_init_upgrades_existing_constitution_without_overwriting_custom_rules(self):
+        target = Path(self.test_dir)
+        agents = target / "AGENTS.md"
+        old = "# Dual-Agent Workspace Constitution (Antigravity & Codex)\nCustom project rule.\n"
+        agents.write_text(old, encoding="utf-8")
+        init_target_project(target_project=target)
+        current = agents.read_text(encoding="utf-8")
+        self.assertTrue(current.startswith(old))
+        self.assertIn("<!-- codex-loop:phase-checkpoint-v1 -->", current)
+        init_target_project(target_project=target)
+        self.assertEqual(agents.read_text(encoding="utf-8"), current)
 
     def test_init_target_project_idempotent(self):
         target = Path(self.test_dir)
@@ -133,4 +168,3 @@ class TestCodexLoopTargetProject(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
