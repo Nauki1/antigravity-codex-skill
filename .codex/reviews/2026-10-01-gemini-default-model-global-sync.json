@@ -1,0 +1,14 @@
+{
+  "codex": {
+    "directory": "C:\\Users\\Nauki\\.agents\\skills\\codex-loop",
+    "test_exit_code": 0,
+    "independent_agy_behavior_preserved": true,
+    "default_agy_model": "gemini-3.8-flash-high"
+  },
+  "antigravity": {
+    "directory": "C:\\Users\\Nauki\\.gemini\\config\\skills\\codex",
+    "test_exit_code": 0,
+    "independent_agy_behavior_preserved": true,
+    "default_agy_model": "gemini-3.8-flash-high"
+  }
+}

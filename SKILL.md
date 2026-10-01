@@ -102,6 +102,8 @@ python <SKILL_PATH>/scripts/codex_loop.py exec-agy [--task docs/task.md] [--proj
 ```
 Antigravity CLI (`agy`) 将在目标工程后台以静默无头模式（`--mode=accept-edits`）实施代码并执行测试，完成后交还 Codex 执行复审。
 
+当前初次实施和 `fix` 返工统一显式使用 `--model gemini-3.8-flash-high`（Gemini 3.8 Flash High）；默认值集中在脚本的 `DEFAULT_AGY_MODEL`。这只控制技能派发的 Antigravity 调用。
+
 `exec-agy` 用于初次实施。审查后自动返工使用上面的 `fix` 入口和持久化预算，不能重复调用初次实施入口绕过上限。
 
 ---

@@ -603,6 +603,19 @@ class TestReview(unittest.TestCase):
         self.invoke("--out", str(report))
         return report
 
+    def test_fix_dispatch_selects_flash_high_with_real_provider_entry(self):
+        report = self.save_fix_review()
+        self.runner.reset_mock()
+        self.runner.side_effect = None
+        self.runner.return_value = subprocess.CompletedProcess([], 0, json.dumps({"status": "SUCCESS", "response": "Done"}), "")
+        self.assertEqual(self.invoke_fix(report), 0)
+        self.runner.assert_called_once()
+        command = self.runner.call_args.args[0]
+        self.assertEqual(command.count("--model"), 1)
+        self.assertEqual(command[command.index("--model") + 1], "gemini-3.8-flash-high")
+        self.assertIn("--mode=accept-edits", command)
+        self.assertEqual(self.runner.call_args.kwargs["cwd"], str(Path(self.target).resolve()))
+
     def test_fix_budget_persists_and_stops_at_two_attempts(self):
         agy = self.enterContext(patch.object(codex_loop, "run_agy", return_value=True))
         for _ in range(2):

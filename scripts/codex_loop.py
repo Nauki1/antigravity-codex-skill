@@ -81,6 +81,7 @@ def find_agy_binary():
 
 CODEX_BIN = find_codex_binary()
 AGY_BIN = find_agy_binary()
+DEFAULT_AGY_MODEL = "gemini-3.8-flash-high"
 
 
 def resolve_target_project(project_arg=None):
@@ -958,7 +959,7 @@ def run_agy(task_file="docs/task.md", prompt=None, target_project=None):
         p = target / p
 
     instruction = prompt or f"阅读 AGENTS.md 与 {p}，按计划实现代码，仅修改相关文件，并执行规定的验收测试命令；不要再次调用 Codex，不提交代码。"
-    cmd = [AGY_BIN, "-p", instruction, "--mode=accept-edits"]
+    cmd = [AGY_BIN, "--model", DEFAULT_AGY_MODEL, "-p", instruction, "--mode=accept-edits"]
     print(f"[*] 启动 Antigravity CLI (agy) 无头实施中 (Project: {target}, Task: {p})...", file=sys.stderr)
     res = subprocess.run(cmd, cwd=str(target), stdin=subprocess.DEVNULL)
     return res.returncode == 0
